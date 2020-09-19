@@ -1,7 +1,8 @@
 from configparser import ConfigParser
+
 import boto3
-from prettyprinter import pprint
 import msgpack
+from prettyprinter import pprint
 
 configfile = '/etc/wbalert.cfg'
 

@@ -10,6 +10,12 @@ prettyprinter = "*"
 boto3 = "*"
 msgpack = "*"
 discord = "*"
+fuzzywuzzy = "*"
+python-pushover = "*"
+loguru = "*"
+python-levenshtein = "*"
+uvloop = "*"
+pytz = "*"
 
 [requires]
 python_version = "3.8"
