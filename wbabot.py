@@ -19,7 +19,7 @@ from prettyprinter import pprint
 from pushover import Client, init
 
 from processlock import PLock
-from timefunctions import convert_time, elapsedTime
+from timefunctions import convert_time, elapsedTime, killtime
 
 WORLD_BOSSES = {'Azuregos': 'Azhara', 'Kazzak': "Blasted Lands", "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
 DRAGON_ZONES = {1: 'Ashenvale', 2: 'Feralas', 3: 'The Hinterlands', 4: 'Duskwood'}
@@ -136,10 +136,13 @@ running_alert = {}
 running_removeme = {}
 
 # init new db
-# data = {'0': str(int(datetime.now().timestamp()))}
+# data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600167600}
 # msgpack.dump(data, open(userdatafile, 'wb'))
+
 userdata = msgpack.load(open(userdatafile, 'rb'))
-userdata['2'] = {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
+if '2' not in userdata:
+    userdata['2'] = {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
+userdata['3'] = 1600167600
 log.info(f'Userdata loaded from {userdatafile}')
 
 optout_list = sns.list_phone_numbers_opted_out()['phoneNumbers']
@@ -149,7 +152,7 @@ def saveuserdata():
     msgpack.dump(userdata, open(userdatafile, 'wb'))
     log.trace(f'Userdata saved to {userdatafile}')
 
-
+saveuserdata()
 def usersub(number):
     if number in sns.list_phone_numbers_opted_out()['phoneNumbers']:
         log.warning(f'Number [{number}] found in OptOut list, trying to remove')
@@ -175,11 +178,11 @@ async def checkoptouts():
     await sleep(60 * 60)
 
 
-async def pubmsg(message, user, worldboss, zone):
+async def pubmsg(message, user, worldboss, zone, invite):
     userdata['0'] = str(int(datetime.now().timestamp()))
     userdata['1'] = {'boss': worldboss, 'zone': zone}
     saveuserdata()
-    msg = f"Everyone log in now and get to {zone.title()}\n**{len(userdata)-2}** players are being notified"
+    msg = f"Everyone log in now and get to **{zone.title()}**\nSend tell to **{invite.capitalize()}** for invite\n**{len(userdata)-3}** players are being notified"
     embed = discord.Embed(title=f"{worldboss.title()} is UP in {zone.title()}!", description=msg, color=SUCCESS_COLOR)
     embed.set_footer(text=f'Type {prefix}alert addme to get World Boss alerts\nWorld Boss Broadcast System')
     channel = bot.get_channel(int(announce_chan))
@@ -187,29 +190,41 @@ async def pubmsg(message, user, worldboss, zone):
         everyone = get(guild.roles, id=int(everyone_id))
     # await channel.send(everyone.mention)
     await channel.send(everyone.mention, embed=embed)
-    smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nLog in now if possible\n\nReply STOP to end these notifications permenantly'
+    smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite\n\nReply STOP to end these notifications permenantly'
     log.debug(f'Sending AWS SNS notification to topic [{topic_arn}]')
-    try:
-        snsresponse = sns.publish(TopicArn=topic_arn, Message=smsmsg)
-    except:
-        log.exception('Error in AWS SNS topid send')
-    pomsg = f'{worldboss.title()} is up in {zone.title()}!\nLog in now if possible'
+    if BRANCH != 'develop':
+        try:
+            snsresponse = sns.publish(TopicArn=topic_arn, Message=smsmsg)
+        except:
+            log.exception('Error in AWS SNS topid send')
+    else:
+        log.warning('Skipping actual SNS notifications due to DEV MODE')
+    pomsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite'
+    pmmsg = f'{worldboss.title()} is up in {zone.title()}! Send tell to {invite.capitalize()} for invite\nType !alert remove to stop these alerts'
     for uid, udata in userdata.items():
-        if uid != '0' and uid != '1':
+        if uid != '0' and uid != '1' and uid != '2':
             if udata['alert'] == '1':
                 log.debug(f'Sending discord PM notification to [{uid}]')
-                duser = bot.get_user(int(uid))
-                await duser.send(embed=embed)
+                if BRANCH != 'develop':
+                    try:
+                        duser = bot.get_user(int(uid))
+                        await duser.send(pmmsg)
+                    except:
+                        log.exception('Error in pm send')
+                else:
+                    log.warning('Skipping actual PM notifications due to DEV MODE')
                 await sleep(.1)
             elif udata['alert'] == '2':
                 log.debug(f'Sending pushover notification to [{uid}]')
-                try:
-                    Client(udata['pushover_id']).send_message(pomsg, title="World Boss Alert")
-                    await sleep(1)
-                except:
-                    log.exception('Error in pushover send')
+                if BRANCH != 'develop':
+                    try:
+                        Client(udata['pushover_id']).send_message(pomsg, title="World Boss Alert")
+                        await sleep(1)
+                    except:
+                        log.exception('Error in pushover send')
+                else:
+                    log.warning('Skipping actual pushover notifications due to DEV MODE')
     await logchan(message, user, worldboss, zone)
-    return snsresponse
 
 
 async def logchan(message, user, worldboss, zone, *args):
@@ -327,7 +342,7 @@ async def on_message(message):
         user = await user_info(message)
         if user['guild_id'] is None:
             pass
-        else:
+        elif user['is_user'] or user['is_admin']:
             if user['user_id'] in running_addme:
                 if message.content.lower() == 'cancel' or message.content.lower() == 'stop':
                     title = 'Alert setup cancelled'
@@ -363,51 +378,101 @@ async def on_message(message):
             else:
                 args = message.content[1:].split(' ')
                 if type(message.channel) == discord.channel.DMChannel:
-                    if user['is_user'] or user['is_admin']:
-                        if args[0].startswith('dd'):
-                            await addme(message, user, *args)
-                        elif args[0].startswith('emove'):
-                            await removeme(message, user, *args)
-                        elif args[0].startswith('top'):
-                            await removeme(message, user, *args)
-                        elif args[0].startswith('tatus'):
-                            await status(message, user, *args)
-                        elif args[0].startswith('otal'):
-                            await total(message, user, *args)
-                        elif args[0].startswith('lert'):
-                            await status(message, user, *args)
-                        elif args[0].startswith('hange'):
-                            await addme(message, user, *args)
-                        elif args[0].startswith('elp'):
-                            await help(message, user, *args)
-                        elif args[0].startswith('ast'):
-                            await last(message, user, *args)
-                        elif args[0].startswith('est') and user['is_superadmin']:
-                            await test(message, user, *args)
-                        elif args[0].startswith('orceremove') and user['is_superadmin']:
-                            await forceremove(message, user, *args)
+                    if args[0].startswith('dd'):
+                        await addme(message, user, *args)
+                    elif args[0].startswith('emove'):
+                        await removeme(message, user, *args)
+                    elif args[0].startswith('top'):
+                        await removeme(message, user, *args)
+                    elif args[0].startswith('tatus'):
+                        await status(message, user, *args)
+                    elif args[0].startswith('otal'):
+                        await total(message, user, *args)
+                    elif args[0].startswith('lert'):
+                        await status(message, user, *args)
+                    elif args[0].startswith('hange'):
+                        await addme(message, user, *args)
+                    elif args[0].startswith('elp'):
+                        await help(message, user, *args)
+                    elif args[0].startswith('ast'):
+                        await last(message, user, *args)
+                    elif args[0].startswith('est') and user['is_superadmin']:
+                        await test(message, user, *args)
+                    elif args[0].startswith('orceremove') and user['is_superadmin']:
+                        await forceremove(message, user, *args)
                 if message.content.lower().startswith(f'{prefix}alert'):
-                    if user['is_user'] or user['is_admin']:
-                        args.pop(0)
-                        if len(args) == 0:
+                    args.pop(0)
+                    if len(args) == 0:
+                        await status(message, user, *args)
+                    else:
+                        if args[0] == 'addme' or args[0] == 'add' or args[0] == 'change' or args[0] == 'changeme':
+                            await addme(message, user, *args)
+                        elif args[0] == 'removeme' or args[0] == 'remove' or args[0] == 'stop':
+                            await removeme(message, user, *args)
+                        elif args[0] == 'status':
                             await status(message, user, *args)
+                        elif args[0] == 'last':
+                            await last(message, user, *args)
+                        elif args[0] == 'total':
+                            await total(message, user, *args)
+                        elif args[0] == 'killed' or args[0] == 'kill' or args[0] == 'dead':
+                            await killed(message, user, *args)
+                        elif args[0] == 'test' and user['is_superadmin']:
+                            await test(message, user, *args)
+                        elif args[0] == 'forceremove' and user['is_superadmin']:
+                            await forceremove(message, user, *args)
                         else:
-                            if args[0] == 'addme' or args[0] == 'add' or args[0] == 'change' or args[0] == 'changeme':
-                                await addme(message, user, *args)
-                            elif args[0] == 'removeme' or args[0] == 'remove' or args[0] == 'stop':
-                                await removeme(message, user, *args)
-                            elif args[0] == 'status':
-                                await status(message, user, *args)
-                            elif args[0] == 'last':
-                                await last(message, user, *args)
-                            elif args[0] == 'total':
-                                await total(message, user, *args)
-                            elif args[0] == 'test' and user['is_superadmin']:
-                                await test(message, user, *args)
-                            elif args[0] == 'forceremove' and user['is_superadmin']:
-                                await forceremove(message, user, *args)
-                            else:
-                                await alert(message, user, *args)
+                            await alert(message, user, *args)
+                elif message.content.lower().startswith(f'{prefix}kill'):
+                    args.pop(0)
+                    await killed(message, user, *args)
+
+
+async def killed(message, user, *args):
+    if len(args) > 0:
+        boss = fuzzybosslookup(args[0])
+        if boss is not None:
+            if len(args) == 1:
+                downtime = int(datetime.now().timestamp())
+            elif len(args) == 2:
+                downtime = killtime(args[1])
+                if downtime is not None:
+                    log.info(f'{boss} kill time updated to {downtime}')
+                    ud = userdata['2']
+                    ud[boss] = downtime
+                    saveuserdata()
+                    # writemessage boss kill time saved
+                else:
+                    pass
+                    # Problem with time entry
+            elif len(args) == 3:
+                arg = f'{args[1]}{args[2]}'
+                downtime = killtime(arg)
+                if downtime is not None:
+                    log.info(f'{boss} kill time updated to {downtime}')
+                    ud = userdata['2']
+                    ud[boss] = downtime
+                    saveuserdata()
+                    # writemessage boss kill time saved
+                else:
+                    pass
+                    # Problem with time entry
+            else:
+                pass
+                # Problem with time entry
+        else:
+            pass
+            # Must supply correct boss name
+    else:
+        pass
+        # Must supply boss name
+
+
+    #if len(args) == 2:
+    #    ud = userdata['2']
+    #    ud['respo'] = int(datetime.now().timestamp())
+    #    userdata['2'] = ud
+
 
 
 async def alert(message, user, *args):
@@ -423,7 +488,6 @@ async def alert(message, user, *args):
             embed = discord.Embed(title=title, description=msg, color=FAIL_COLOR)
             await messagesend(message, embed, user, pm=False)
         else:
-            user = running_alert[nuid]
             user['step'] = 1
             running_alert[nuid] = user
             await alert1(message, user, *args)
@@ -445,17 +509,20 @@ async def alert1(message, user, *args):
             log.info(f"Starting ALERT TRIGGER for {user['user_name']} from {user['guild_name']}")
             nuser = running_alert[nuid]
             nuser['boss'] = boss.title()
-            running_alert[nuid] = nuser
             if WORLD_BOSSES[boss] is None:
+                running_alert[nuid] = nuser
                 await alert2(message, user, *args)
             else:
-                await alertfinalize(message, user, *args)
+                nuser = running_alert[nuid]
+                nuser['zone'] = WORLD_BOSSES[boss]
+                running_alert[nuid] = nuser
+                await alert3(message, user, *args)
 
 
 async def alert2(message, user, *args):
     nuid = user['user_id']
     if user['user_id'] in running_alert:
-        title = f'Select which zone {running_alert[user["user_id"]]["wboss"]} is in:'
+        title = f'Select which zone {running_alert[user["user_id"]]["boss"]} is in:'
         msg = ''
         for num, zone in DRAGON_ZONES.items():
             msg = msg + f'**{num}**: {zone.title()}\n'
@@ -503,9 +570,14 @@ async def alert3(message, user, *args):
 
 async def alert_r2(message, user, *args):
     resp = message.content
+    nuid = user['user_id']
     lastmsg = running_alert[user['user_id']]['lastmsg']
     if type(lastmsg.channel) != discord.channel.DMChannel:
         await lastmsg.delete()
+    nuser = running_alert[nuid]
+    nuser['invite'] = resp
+    running_alert[nuid] = nuser
+    await alertfinalize(message, user, *args)
 
 
 async def alertfinalize(message, user, *args):
@@ -513,7 +585,7 @@ async def alertfinalize(message, user, *args):
     if type(message.channel) != discord.channel.DMChannel:
         await message.delete()
     title = f'You are about send a World Boss Alert!'
-    msg = f'**{running_alert[nuid]["boss"].title()}** in **{running_alert[nuid]["zone"].title()}**\nEveryone subscribed will get an alert to log on now!\nAre you sure you want to do this?\n\n**1**: Yes, Send it!\n**2**: No, Cancel alert'
+    msg = f'**{running_alert[nuid]["boss"].title()}** in **{running_alert[nuid]["zone"].title()}**\nTells will go to **{running_alert[nuid]["invite"].title()}** for raid invite\nEveryone subscribed will get an alert to log on now!\nAre you sure you want to do this?\n\n**1**: Yes, Send it!\n**2**: No, Cancel alert'
     embed = discord.Embed(title=title, description=msg, color=SUCCESS_COLOR)
     embed.set_footer(text='Type your number selection below')
     lastmsg = await messagesend(message, embed, user, pm=False)
@@ -746,12 +818,12 @@ async def removeme_r1(message, user, *args):
 
 
 async def total(message, user, *args):
-    title = f'There are {len(userdata)-2} players setup for World Boss alerts'
+    title = f'There are {len(userdata)-3} players setup for World Boss alerts'
     discordcount = 0
     pushovercount = 0
     textcount = 0
     for each, udata in userdata.items():
-        if each != '0' and each != '1':
+        if each != '0' and each != '1' and each != '2':
             if udata['alert'] == '1':
                 discordcount = discordcount + 1
             elif udata['alert'] == '2':
