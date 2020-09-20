@@ -1,0 +1,16 @@
+[Unit]
+Description= World Boss Alert Discord Bot Daemon Service
+Requires=
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=user
+WorkingDirectory=/home/user/wbalert
+ExecStart=/usr/local/bin/pipenv run python /home/user/wbalert/wbabot.py
+
+[Install]
+WantedBy=multi-user.target
