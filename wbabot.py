@@ -182,7 +182,7 @@ async def pubmsg(message, user, worldboss, zone, invite):
     userdata['0'] = str(int(datetime.now().timestamp()))
     userdata['1'] = {'boss': worldboss, 'zone': zone}
     saveuserdata()
-    msg = f"Everyone log in now and get to **{zone.title()}**\nSend tell to **{invite.capitalize()}** for invite\n**{len(userdata)-3}** players are being notified"
+    msg = f"Everyone log in now and get to **{zone.title()}**\nSend tell to **{invite.capitalize()}** for invite\n**{len(userdata)-4}** players are being notified"
     embed = discord.Embed(title=f"{worldboss.title()} is UP in {zone.title()}!", description=msg, color=SUCCESS_COLOR)
     embed.set_footer(text=f'Type {prefix}alert addme to get World Boss alerts\nWorld Boss Broadcast System')
     channel = bot.get_channel(int(announce_chan))
@@ -202,7 +202,7 @@ async def pubmsg(message, user, worldboss, zone, invite):
     pomsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite'
     pmmsg = f'{worldboss.title()} is up in {zone.title()}! Send tell to {invite.capitalize()} for invite\nType !alert remove to stop these alerts'
     for uid, udata in userdata.items():
-        if uid != '0' and uid != '1' and uid != '2':
+        if uid != '0' and uid != '1' and uid != '2' and uid != '3':
             if udata['alert'] == '1':
                 log.debug(f'Sending discord PM notification to [{uid}]')
                 if BRANCH != 'develop':
@@ -818,12 +818,12 @@ async def removeme_r1(message, user, *args):
 
 
 async def total(message, user, *args):
-    title = f'There are {len(userdata)-3} players setup for World Boss alerts'
+    title = f'There are {len(userdata)-4} players setup for World Boss alerts'
     discordcount = 0
     pushovercount = 0
     textcount = 0
     for each, udata in userdata.items():
-        if each != '0' and each != '1' and each != '2':
+        if each != '0' and each != '1' and each != '2' and each != '3':
             if udata['alert'] == '1':
                 discordcount = discordcount + 1
             elif udata['alert'] == '2':
