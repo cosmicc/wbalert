@@ -23,6 +23,34 @@ def _epoch_to_dto(epoch):
     return datetime.fromtimestamp(fixedepoch)
 
 
+def epochtopst(epoch, fmt='dt'):
+    dt = _epoch_to_dto(epoch)
+    dt = timezone('UTC').localize(dt)
+    dt = dt.astimezone(timezone('US/Pacific'))
+    if fmt == 'dt':
+        return dt
+    elif fmt == 'str' or fmt == 'string':
+        return dt.strftime('%A, %b %d, %I:%M %p')
+
+
+def servertime(stime):
+    if len(bb) < 2:
+        return None
+    if not bb[0].isnumeric():
+        return None
+    hour = bb[0]
+    minute = bb[1][:2]
+    if not minute.isnumeric():
+        return None
+    loc = bb[1][2:]
+    if loc.upper() != "AM" and loc.upper() != "PM" and loc.upper() != "P" and loc.upper() != "A":
+        return None
+    if loc.upper() == 'A':
+        loc = 'AM'
+    elif loc.upper() == 'P':
+        loc = 'PM'
+   
+
 def killtime(ktime):
     dt = datetime.today()
     dt = timezone('UTC').localize(dt)

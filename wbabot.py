@@ -19,10 +19,13 @@ from prettyprinter import pprint
 from pushover import Client, init
 
 from processlock import PLock
-from timefunctions import convert_time, elapsedTime, killtime
+from timefunctions import convert_time, elapsedTime, killtime, epochtopst
+from apifetch import BlizzardAPI
 
 WORLD_BOSSES = {'Azuregos': 'Azhara', 'Kazzak': "Blasted Lands", "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
 DRAGON_ZONES = {1: 'Ashenvale', 2: 'Feralas', 3: 'The Hinterlands', 4: 'Duskwood'}
+
+SPAWN_TIMES = {'Azuregos': {'resetmin': 43200, 'resetmax': 172800, 'spawnmin': 259200, 'spawnmax': 432000}, 'Kazzak': {'resetmin': 43200, 'resetmax': 172800, 'spawnmin': 259200, 'spawnmax': 432000}, "Ysondre": {'resetmin': 108000, 'resetmax': 130500, 'spawnmin': 259200, 'spawnmax': 432000}, 'Emeriss': {'resetmin': 108000, 'resetmax': 130500, 'spawnmin': 259200, 'spawnmax': 432000}, 'Taerar': {'resetmin': 108000, 'resetmax': 130500, 'spawnmin': 259200, 'spawnmax': 432000}, 'Lethon': {'resetmin': 108000, 'resetmax': 130500, 'spawnmin': 259200, 'spawnmax': 432000}}
 
 fuzzy_command_error = 75
 
@@ -94,6 +97,10 @@ pushover_token = systemconfig.get("general", "pushover_token")
 throttle_min = systemconfig.get("general", "throttle_min")
 log_channel = systemconfig.get("general", "log_channel")
 log_to_chan = systemconfig.get("general", "log_to_chan")
+bliz_clientid = systemconfig.get("general", "bliz_clientid")
+bliz_secret = systemconfig.get("general", "bliz_secret")
+announce_server_up = systemconfig.get("general", "announce_server_up")
+
 
 consoleformat = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green>| <level>{level: <8}</level> | <level>{message}</level> |<cyan>{function}</cyan>:<cyan>{line}</cyan>"
 logformat = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green>| <level>{level: <8}</level> | <level>{message}</level> |<cyan>{function}:{line}</cyan>"
@@ -101,6 +108,11 @@ logformat = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green>| <level>{level: <8}</
 log.remove()
 
 log.level("TRACE", color="<fg 245>")
+log.level("COMPLETE", no=21, color="<fg 129>", icon="¤")
+log.level("START", no=21, color="<fg 219>", icon="¤")
+log.level("REQUEST", no=20, color="<fg 221>", icon="¤")
+log.level("TRIGGER", no=20, color="<light-cyan>", icon="¤")
+log.level("SERVER", no=20, color="<fg 231>", icon="¤")
 
 if len(argv) > 1 or BRANCH == "develop":
     ll = "TRACE"
@@ -134,25 +146,77 @@ log.debug('Pushover client initalized')
 running_addme = {}
 running_alert = {}
 running_removeme = {}
+serverup = True
 
 # init new db
 # data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600167600}
 # msgpack.dump(data, open(userdatafile, 'wb'))
 
 userdata = msgpack.load(open(userdatafile, 'rb'))
-if '2' not in userdata:
-    userdata['2'] = {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
-userdata['3'] = 1600167600
 log.info(f'Userdata loaded from {userdatafile}')
 
 optout_list = sns.list_phone_numbers_opted_out()['phoneNumbers']
+
+
+async def is_serverup():
+    global serverup
+    blizcli = BlizzardAPI(bliz_clientid, bliz_secret, 'US')
+    await blizcli.authorize()
+    serverstatus = await blizcli.realm_status('4398')
+    await blizcli.close()
+    if 'error' in serverstatus or serverstatus is None:
+        log.warning(f"Blizzard API server query error: {serverstatus['error']}")
+        return None
+    else:
+        if serverstatus['status']['type'] == 'UP':
+            if not serverup:
+                dt = datetime.now()
+                log.log("SERVER", "Server query return server back UP")
+                log.info(f'Updating Server reset time to [{epochtopst(int(dt.timestamp()), fmt="string")}]')
+                userdata['3'] = int(dt.timestamp())
+                saveuserdata()
+                if announce_server_up == 'True':
+                    pass
+                    #announce server back up in scount channel
+            serverup = True
+            return True
+        else:
+            log.log("SERVER", 'Server query returned server is DOWN')
+            serverup = False
+            return False
+
+
+async def maintloop():
+    while True:
+        now = int(datetime.now().timestamp())
+        for user, udata in running_alert:
+            if udata['timer'] > (now + (60 * 5)):
+                log.warning(f'Running alert timeout for [{udata["user_name"]}]')
+                # send cancel message
+                del running_alert[user]
+        for user, udata in running_addme:
+            if udata['timer'] > (now + (60 * 60)):
+                log.warning(f'Running addme timeout for [{udata["user_name"]}]')
+                # send cancel message
+                del running_addme[user]
+        for user, udata in running_removeme:
+            if udata['timer'] > (now + (60 * 60)):
+                log.warning(f'Running removeme timeout for [{udata["user_name"]}]')
+                # send cancel message
+                del running_removeme[user]
+        dt = datetime.now()
+        if dt.weekday() == 1 and (dt.hour >= 13 and dt.hour <= 15):
+            is_serverup()
+        await sleep(50)
+
+bot.loop.create_task(maintloop())
 
 
 def saveuserdata():
     msgpack.dump(userdata, open(userdatafile, 'wb'))
     log.trace(f'Userdata saved to {userdatafile}')
 
-saveuserdata()
+
 def usersub(number):
     if number in sns.list_phone_numbers_opted_out()['phoneNumbers']:
         log.warning(f'Number [{number}] found in OptOut list, trying to remove')
@@ -188,8 +252,8 @@ async def pubmsg(message, user, worldboss, zone, invite):
     channel = bot.get_channel(int(announce_chan))
     for guild in bot.guilds:
         everyone = get(guild.roles, id=int(everyone_id))
-    # await channel.send(everyone.mention)
-    await channel.send(everyone.mention, embed=embed)
+    await channel.send(everyone.mention)
+    await channel.send(embed=embed)
     smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite\n\nReply STOP to end these notifications permenantly'
     log.debug(f'Sending AWS SNS notification to topic [{topic_arn}]')
     if BRANCH != 'develop':
@@ -252,6 +316,31 @@ def fuzzybosslookup(boss):
         return None
 
 
+def getnextspawn(boss, getmax=False):
+    bosstimes = SPAWN_TIMES[boss.title()]
+    lastreset = int(userdata['3'])
+    lasttime = userdata['2'][boss.title()]
+    nextreset = int(userdata['3']) + 604800
+    if lasttime is None:
+        lasttime = lastreset
+    else:
+        lasttime = int(lasttime)
+    if lastreset == lasttime:
+        if getmax:
+            spawnmin = bosstimes['resetmax']
+        else:
+            spawnmin = bosstimes['resetmin']
+    else:
+        if getmax:
+            spawnmin = bosstimes['spawnmax']
+        else:
+            spawnmin = bosstimes['spawnmin']
+    if (lasttime + spawnmin) < nextreset:
+        return epochtopst(lasttime + spawnmin)
+    else:
+        return epochtopst(nextreset + bosstimes['resetmin'])
+
+
 async def user_info(message):
     if type(message.channel) == discord.channel.DMChannel:
         for guild in bot.guilds:
@@ -296,7 +385,7 @@ def logcommand(message, user):
         dchan = "Direct Message"
     else:
         dchan = message.channel
-    log.log("INFO", f"Request [{message.content}] from [{message.author}] in [#{dchan}]")
+    log.log("REQUEST", f"Request [{message.content}] from [{message.author}] in [#{dchan}]")
 
 
 async def fake_typing(message):
@@ -313,15 +402,24 @@ async def bad_command(message, user, *args):
     await messagesend(message, embed, user)
 
 
-async def messagesend(message, embed, user, pm=False):
+async def messagesend(message, embed, user, pm=False, noembed=False):
     try:
         if type(message.channel) == discord.channel.DMChannel or pm:
-            return await message.author.send(embed=embed)
+            if noembed:
+                return await message.author.send(embed)
+            else:
+                return await message.author.send(embed=embed)
         elif type(message.channel) != discord.channel.DMChannel and pm:
             await message.delete()
-            return await message.author.send(embed=embed)
+            if noembed:
+                return await message.author.send(embed)
+            else:
+                return await message.author.send(embed=embed)
         else:
-            return await message.channel.send(embed=embed)
+            if noembed:
+                return await message.channel.send(embed)
+            else:
+                return await message.channel.send(embed=embed)
     except:
         log.exception("Critical error in message send")
 
@@ -417,6 +515,10 @@ async def on_message(message):
                             await total(message, user, *args)
                         elif args[0] == 'killed' or args[0] == 'kill' or args[0] == 'dead':
                             await killed(message, user, *args)
+                        elif args[0] == 'timer' or args[0] == 'timers' or args[0] == 'scout':
+                            await timers(message, user, *args)
+                        elif args[0] == 'server' or args[0] == 'reset':
+                            await serverreset(message, user, *args)
                         elif args[0] == 'test' and user['is_superadmin']:
                             await test(message, user, *args)
                         elif args[0] == 'forceremove' and user['is_superadmin']:
@@ -426,9 +528,17 @@ async def on_message(message):
                 elif message.content.lower().startswith(f'{prefix}kill'):
                     args.pop(0)
                     await killed(message, user, *args)
+                elif message.content.lower().startswith(f'{prefix}time'):
+                    args.pop(0)
+                    await timers(message, user, *args)
+                elif message.content.lower().startswith(f'{prefix}time'):
+                    args.pop(0)
+                    await timers(message, user, *args)
+
 
 
 async def killed(message, user, *args):
+    logcommand(message, user)
     if len(args) > 0:
         boss = fuzzybosslookup(args[0])
         if boss is not None:
@@ -436,43 +546,52 @@ async def killed(message, user, *args):
                 downtime = int(datetime.now().timestamp())
             elif len(args) == 2:
                 downtime = killtime(args[1])
-                if downtime is not None:
-                    log.info(f'{boss} kill time updated to {downtime}')
-                    ud = userdata['2']
-                    ud[boss] = downtime
-                    saveuserdata()
-                    # writemessage boss kill time saved
-                else:
-                    pass
-                    # Problem with time entry
             elif len(args) == 3:
                 arg = f'{args[1]}{args[2]}'
                 downtime = killtime(arg)
-                if downtime is not None:
-                    log.info(f'{boss} kill time updated to {downtime}')
-                    ud = userdata['2']
-                    ud[boss] = downtime
-                    saveuserdata()
-                    # writemessage boss kill time saved
-                else:
-                    pass
-                    # Problem with time entry
             else:
-                pass
-                # Problem with time entry
+                msg = f'Too many arguments. example: `{prefix}killed <bossname> 9:35PM`'
+                await messagesend(message, msg, user, noembed=True)
+                return None
+            if downtime is not None:
+                log.info(f'{boss} kill time updated to {epochtopst(downtime,fmt="string")}')
+                ud = userdata['2']
+                ud[boss] = downtime
+                saveuserdata()
+                ns = downtime + SPAWN_TIMES[boss]['spawnmin']
+                msg = f'{boss} kill recorded: {epochtopst(downtime,fmt="string")} Server Time\nNext spawn window starts at {epochtopst(ns,fmt="string")}'
+                await messagesend(message, msg, user, noembed=True)
+            else:
+                msg = f'Cannot determine the time entered. example: `{prefix}killed <bossname> 9:35PM`'
+                await messagesend(message, msg, user, noembed=True)
+                return None
         else:
-            pass
-            # Must supply correct boss name
+            msg = f'World boss name incorrect. example: `{prefix}killed <bossname> 9:35PM`'
+            await messagesend(message, msg, user, noembed=True)
+            return None
     else:
-        pass
-        # Must supply boss name
+            msg = f'Must supply World Boss name. example: `{prefix}killed <bossname> 9:35PM`'
+            await messagesend(message, msg, user, noembed=True)
+            return None
 
 
-    #if len(args) == 2:
-    #    ud = userdata['2']
-    #    ud['respo'] = int(datetime.now().timestamp())
-    #    userdata['2'] = ud
-
+async def timers(message, user, *args):
+    logcommand(message, user)
+    now = int(datetime.now().timestamp())
+    title = 'World Boss spawn estimates'
+    embed = discord.Embed(title=title, color=INFO_COLOR)
+    for boss in SPAWN_TIMES:
+        nexttime = int(getnextspawn(boss).timestamp())
+        nextlongtime = int(getnextspawn(boss, getmax=True).timestamp())
+        if nexttime < now:
+            msg = f'Spawn window started {elapsedTime(now, nexttime, granularity=3)} ago\n'
+            msg = msg + f'Last possible spawn in {elapsedTime(now, nextlongtime, granularity=3)}'
+            embed.add_field(name=f'{boss} in spawn window now', value=msg, inline=False)
+        else:
+            msg = f'Next earliest spawn in {elapsedTime(now, nexttime, granularity=3)}\non {epochtopst(nexttime, fmt="string")} Server Time'
+            embed.add_field(name=f'{boss} waiting for spawn window to open', value=msg, inline=False)
+    embed.set_footer(text=f'Last server reset recorded {epochtopst(int(userdata["3"]), fmt="string")}')
+    await messagesend(message, embed, user, *args)
 
 
 async def alert(message, user, *args):
@@ -489,6 +608,7 @@ async def alert(message, user, *args):
             await messagesend(message, embed, user, pm=False)
         else:
             user['step'] = 1
+            user['timer'] = int(datetime.now().timestamp())
             running_alert[nuid] = user
             await alert1(message, user, *args)
 
@@ -506,7 +626,7 @@ async def alert1(message, user, *args):
             embed = discord.Embed(title=title, description=msg, color=FAIL_COLOR)
             await messagesend(message, embed, user, pm=False)
         else:
-            log.info(f"Starting ALERT TRIGGER for {user['user_name']} from {user['guild_name']}")
+            log.log("TRIGGER", f"Starting ALERT TRIGGER for {user['user_name']} from {user['guild_name']}")
             nuser = running_alert[nuid]
             nuser['boss'] = boss.title()
             if WORLD_BOSSES[boss] is None:
@@ -625,6 +745,7 @@ async def addme(message, user, *args):
     logcommand(message, user)
     uid = str(user['user_id'])
     if user['user_id'] not in running_addme:
+        user['timer'] = int(datetime.now().timestamp())
         log.info(f"Starting Addme for {user['user_name']} from {user['guild_name']}")
         user['step'] = 1
         running_addme[user['user_id']] = user
@@ -764,6 +885,7 @@ async def removeme(message, user, *args):
     logcommand(message, user)
     uid = str(user['user_id'])
     if user['user_id'] not in running_removeme:
+        user['timer'] = int(datetime.now().timestamp())
         log.info(f"Starting removeme for {user['user_name']} from {user['guild_name']}")
         user['step'] = 1
         running_removeme[user['user_id']] = user
@@ -874,6 +996,10 @@ async def help(message, user, *args):
     embed.add_field(name=f"**`{prefix}alert addme`**", value=f"Add yourself to be notified of World Boss alerts", inline=False)
     embed.add_field(name=f"**`{prefix}alert removeme`**", value=f"Remove yourself from World Boss alerts", inline=False)
     embed.add_field(name=f"**`{prefix}alert last`**", value=f"The last World Boss sighting alert", inline=False)
+    embed.add_field(name=f"**`{prefix}alert total`**", value=f"Total players registered for World Boss alerts", inline=False)
+    embed.add_field(name=f"**`{prefix}timers`**", value=f"Estimated spawn times for each World Boss", inline=False)
+    embed.add_field(name=f"**`{prefix}killed <bossname> <time>`**", value=f"Update World Boss killed time", inline=False)
+    embed.add_field(name=f"**`{prefix}reset <time>`**", value=f"Update server boot time. Time format: 9:34pm", inline=False)
     embed.add_field(name=f"**`{prefix}alert help`**", value=f"This help mesage", inline=False)
     if user['is_admin']:
         embed.add_field(name=f"**`{prefix}alert <bossname>`**", value=f"Trigger a World Boss sighting alert!", inline=False)
