@@ -207,22 +207,37 @@ async def is_serverup():
 
 async def maintloop():
     while True:
+        log.trace('Running maintenance loop')
+        pprint(running_alert)
         now = int(datetime.now().timestamp())
+        print(now)
         for user, udata in running_alert.copy().items():
-            if udata['timer'] + (60 * 2) > now:
-                log.warning(f'Running alert timeout for [{udata["user_name"]}]')
-                title = f'World Boss Alert has been cancelled'
-                embed = discord.Embed(title=title, color=FAIL_COLOR)
-                message = udata['lastmsg']
-                if type(message.channel) == discord.channel.DMChannel:
-                    u = bot.get_user(int(user))
-                    await u.send(embed=embed)
+            if udata['timer'] + 30 < now:
+                if udata['step'] > 1:
+                    log.warning(f'Alert timeout override for [{udata["user_name"]}]')
+                    message = udata['lastmsg']
+                    worldboss = udata['boss']
+                    zone = udata['zone']
+                    if 'invite' in udata:
+                        invite = udata['invite']
+                    else:
+                        invite = None
+                    user = userdata[str(user)]
+                    await pubmsg(message, user, worldboss, zone, invite)
                 else:
-                    await message.channel.send(embed=embed)
-                del running_alert[user]
+                    log.warning(f'Running alert timeout for [{udata["user_name"]}]')
+                    title = f'World Boss Alert has been cancelled'
+                    embed = discord.Embed(title=title, color=FAIL_COLOR)
+                    message = udata['lastmsg']
+                    if type(message.channel) == discord.channel.DMChannel:
+                        u = bot.get_user(int(user))
+                        await u.send(embed=embed)
+                    else:
+                        await message.channel.send(embed=embed)
+                    del running_alert[user]
 
         for user, udata in running_addme.copy().items():
-            if udata['timer'] + (60 * 30) > now:
+            if udata['timer'] + (60 * 30) < now:
                 log.warning(f'Running addme timeout for [{udata["user_name"]}]')
                 title = f'World Boss Alert has been cancelled'
                 embed = discord.Embed(title=title, color=FAIL_COLOR)
@@ -231,7 +246,7 @@ async def maintloop():
                 del running_addme[user]
 
         for user, udata in running_removeme.copy().items():
-            if udata['timer'] + (60 * 30) > now:
+            if udata['timer'] + (60 * 30) < now:
                 log.warning(f'Running removeme timeout for [{udata["user_name"]}]')
                 title = f'World Boss Alert has been cancelled'
                 embed = discord.Embed(title=title, color=FAIL_COLOR)
