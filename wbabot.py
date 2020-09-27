@@ -92,7 +92,9 @@ aws_secret = systemconfig.get("general", "aws_secret")
 topic_arn = systemconfig.get("general", "topic_arn")
 userdatafile = systemconfig.get("general", "userdata_file")
 announce_chan = systemconfig.get("general", "announce_chan")
+announce_chan2 = systemconfig.get("general", "announce_chan2")
 everyone_id = systemconfig.get("general", "everyone_id")
+everyone_id2 = systemconfig.get("general", "everyone_id2")
 pushover_token = systemconfig.get("general", "pushover_token")
 throttle_min = systemconfig.get("general", "throttle_min")
 log_channel = systemconfig.get("general", "log_channel")
@@ -155,14 +157,13 @@ serverup = True
 userdata = msgpack.load(open(userdatafile, 'rb'))
 log.info(f'Userdata loaded from {userdatafile}')
 
-if '0' not in userdata:
-    userdata['0'] = str(int(datetime.now().timestamp()))
-if '1' not in userdata:
-    userdata['1'] = {'boss': None, 'zone': None}
-if '2' not in userdata:
-    userdata['2'] = {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
-userdata['3'] = 1600783800
-
+# if '0' not in userdata:
+#    userdata['0'] = str(int(datetime.now().timestamp()))
+# if '1' not in userdata:
+#    userdata['1'] = {'boss': None, 'zone': None}
+# if '2' not in userdata:
+#    userdata['2'] = {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
+# userdata['3'] = 1600783800
 
 optout_list = sns.list_phone_numbers_opted_out()['phoneNumbers']
 
@@ -250,7 +251,7 @@ def saveuserdata():
     msgpack.dump(userdata, open(userdatafile, 'wb'))
     log.trace(f'Userdata saved to {userdatafile}')
 
-saveuserdata()
+
 def usersub(number):
     if number in sns.list_phone_numbers_opted_out()['phoneNumbers']:
         log.warning(f'Number [{number}] found in OptOut list, trying to remove')
@@ -280,15 +281,25 @@ async def pubmsg(message, user, worldboss, zone, invite):
     userdata['0'] = str(int(datetime.now().timestamp()))
     userdata['1'] = {'boss': worldboss, 'zone': zone}
     saveuserdata()
-    msg = f"Everyone log in now and get to **{zone.title()}**\nSend tell to **{invite.capitalize()}** for invite\n**{len(userdata)-4}** players are being notified"
+    if invite is None:
+        msg = f"Everyone log in now and get to **{zone.title()}**\n**{len(userdata)-4}** players are being notified"
+    else:
+        msg = f"Everyone log in now and get to **{zone.title()}**\nSend tell to **{invite.capitalize()}** for invite\n**{len(userdata)-4}** players are being notified"
     embed = discord.Embed(title=f"{worldboss.title()} is UP in {zone.title()}!", description=msg, color=SUCCESS_COLOR)
     embed.set_footer(text=f'Type {prefix}alert addme to get World Boss alerts\nWorld Boss Broadcast System')
     channel = bot.get_channel(int(announce_chan))
+    channel2 = bot.get_channel(int(announce_chan2))
     for guild in bot.guilds:
         everyone = get(guild.roles, id=int(everyone_id))
+        everyone2 = get(guild.roles, id=int(everyone_id2))
     await channel.send(everyone.mention)
     await channel.send(embed=embed)
-    smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite\n\nReply STOP to end these notifications permenantly'
+    await channel2.send(everyone2.mention)
+    await channel2.send(embed=embed)
+    if invite is None:
+        smsmsg = f'{worldboss.title()} is up in {zone.title()}!\n\nReply STOP to end these notifications permanently'
+    else:
+        smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite\n\nReply STOP to end these notifications permanently'
     log.debug(f'Sending AWS SNS notification to topic [{topic_arn}]')
     if BRANCH != 'develop':
         try:
@@ -297,8 +308,12 @@ async def pubmsg(message, user, worldboss, zone, invite):
             log.exception('Error in AWS SNS topid send')
     else:
         log.warning('Skipping actual SNS notifications due to DEV MODE')
-    pomsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite'
-    pmmsg = f'{worldboss.title()} is up in {zone.title()}! Send tell to {invite.capitalize()} for invite\nType !alert remove to stop these alerts'
+    if invite is None:
+        pomsg = f'{worldboss.title()} is up in {zone.title()}!'
+        pmmsg = f'{worldboss.title()} is up in {zone.title()}!\nType !alert remove to stop these alerts'
+    else:
+        pomsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite'
+        pmmsg = f'{worldboss.title()} is up in {zone.title()}! Send tell to {invite.capitalize()} for invite\nType !alert remove to stop these alerts'
     for uid, udata in userdata.items():
         if uid != '0' and uid != '1' and uid != '2' and uid != '3':
             if udata['alert'] == '1':
@@ -384,10 +399,11 @@ async def user_info(message):
                 is_user_role = False
                 admin_id = systemconfig.get("general", "admin_role_id")
                 user_id = systemconfig.get("general", "user_role_id")
+                user_id2 = systemconfig.get("general", "user_role_id2")
                 for role in member.roles:
                     if str(role.id) == str(admin_id):
                         is_admin_role = True
-                    if str(role.id) == str(user_id):
+                    if str(role.id) == str(user_id) or str(role.id) == str(user_id2):
                         is_user_role = True
                 if str(message.author.id) == str(superadmin_id):
                     is_superadmin = True
@@ -401,11 +417,12 @@ async def user_info(message):
         is_user_role = False
         admin_id = systemconfig.get("general", "admin_role_id")
         user_id = systemconfig.get("general", "user_role_id")
+        user_id2 = systemconfig.get("general", "user_role_id2")
         member = discord.utils.get(message.author.guild.members, id=message.author.id)
         for role in member.roles:
             if str(role.id) == str(admin_id):
                 is_admin_role = True
-            if str(role.id) == str(user_id):
+            if str(role.id) == str(user_id) or str(role.id) == str(user_id2):
                 is_user_role = True
             if str(message.author.id) == str(superadmin_id):
                 is_superadmin = True
