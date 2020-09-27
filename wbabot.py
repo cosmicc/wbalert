@@ -149,8 +149,8 @@ running_removeme = {}
 serverup = True
 
 # init new db
-# data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600167600}
-# msgpack.dump(data, open(userdatafile, 'wb'))
+data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600783800}
+msgpack.dump(data, open(userdatafile, 'wb'))
 
 userdata = msgpack.load(open(userdatafile, 'rb'))
 log.info(f'Userdata loaded from {userdatafile}')
@@ -160,6 +160,7 @@ optout_list = sns.list_phone_numbers_opted_out()['phoneNumbers']
 
 async def is_serverup():
     global serverup
+    log.trace(f'Running server up check API call')
     blizcli = BlizzardAPI(bliz_clientid, bliz_secret, 'US')
     await blizcli.authorize()
     serverstatus = await blizcli.realm_status('4398')
@@ -176,12 +177,20 @@ async def is_serverup():
                 userdata['3'] = int(dt.timestamp())
                 saveuserdata()
                 if announce_server_up == 'True':
-                    pass
-                    #announce server back up in scount channel
+                    title = f'Server has come back online on {epochtopst(int(dt.timestamp()), fmt="string")}'
+                    embed = discord.Embed(title=title, color=SUCCESS_COLOR)
+                    channel = bot.get_channel(int(announce_chan))
+                    await channel.send(embed=embed)
             serverup = True
             return True
         else:
-            log.log("SERVER", 'Server query returned server is DOWN')
+            if serverup:
+                log.log("SERVER", 'Server query returned server is DOWN')
+                if announce_server_up == 'True':
+                    title = f'Server has gone offline for maintenance on {epochtopst(int(dt.timestamp()), fmt="string")}'
+                    embed = discord.Embed(title=title, color=SUCCESS_COLOR)
+                    channel = bot.get_channel(int(announce_chan))
+                    await channel.send(embed=embed)
             serverup = False
             return False
 
@@ -189,24 +198,39 @@ async def is_serverup():
 async def maintloop():
     while True:
         now = int(datetime.now().timestamp())
-        for user, udata in running_alert:
-            if udata['timer'] > (now + (60 * 5)):
+        for user, udata in running_alert.copy().items():
+            if udata['timer'] + (60 * 2) > now:
                 log.warning(f'Running alert timeout for [{udata["user_name"]}]')
-                # send cancel message
+                title = f'World Boss Alert has been cancelled'
+                embed = discord.Embed(title=title, color=FAIL_COLOR)
+                message = udata['lastmsg']
+                if type(message.channel) == discord.channel.DMChannel:
+                    u = bot.get_user(int(user))
+                    await u.send(embed=embed)
+                else:
+                    await message.channel.send(embed=embed)
                 del running_alert[user]
-        for user, udata in running_addme:
-            if udata['timer'] > (now + (60 * 60)):
+
+        for user, udata in running_addme.items():
+            if udata['timer'] + (60 * 30) > now:
                 log.warning(f'Running addme timeout for [{udata["user_name"]}]')
-                # send cancel message
+                title = f'World Boss Alert has been cancelled'
+                embed = discord.Embed(title=title, color=FAIL_COLOR)
+                u = bot.get_user(int(user))
+                await u.send(embed=embed)
                 del running_addme[user]
-        for user, udata in running_removeme:
-            if udata['timer'] > (now + (60 * 60)):
+
+        for user, udata in running_removeme.items():
+            if udata['timer'] + (60 * 30) > now:
                 log.warning(f'Running removeme timeout for [{udata["user_name"]}]')
-                # send cancel message
+                title = f'World Boss Alert has been cancelled'
+                embed = discord.Embed(title=title, color=FAIL_COLOR)
+
                 del running_removeme[user]
+
         dt = datetime.now()
         if dt.weekday() == 1 and (dt.hour >= 13 and dt.hour <= 15):
-            is_serverup()
+            await is_serverup()
         await sleep(50)
 
 bot.loop.create_task(maintloop())
@@ -513,12 +537,10 @@ async def on_message(message):
                             await last(message, user, *args)
                         elif args[0] == 'total':
                             await total(message, user, *args)
-                        elif args[0] == 'killed' or args[0] == 'kill' or args[0] == 'dead':
+                        elif args[0] == 'killed' or args[0] == 'kill':
                             await killed(message, user, *args)
                         elif args[0] == 'timer' or args[0] == 'timers' or args[0] == 'scout':
                             await timers(message, user, *args)
-                        elif args[0] == 'server' or args[0] == 'reset':
-                            await serverreset(message, user, *args)
                         elif args[0] == 'test' and user['is_superadmin']:
                             await test(message, user, *args)
                         elif args[0] == 'forceremove' and user['is_superadmin']:
@@ -528,13 +550,9 @@ async def on_message(message):
                 elif message.content.lower().startswith(f'{prefix}kill'):
                     args.pop(0)
                     await killed(message, user, *args)
-                elif message.content.lower().startswith(f'{prefix}time'):
+                elif message.content.lower().startswith(f'{prefix}time') or message.content.lower().startswith(f'{prefix}scout'):
                     args.pop(0)
                     await timers(message, user, *args)
-                elif message.content.lower().startswith(f'{prefix}time'):
-                    args.pop(0)
-                    await timers(message, user, *args)
-
 
 
 async def killed(message, user, *args):
@@ -997,9 +1015,8 @@ async def help(message, user, *args):
     embed.add_field(name=f"**`{prefix}alert removeme`**", value=f"Remove yourself from World Boss alerts", inline=False)
     embed.add_field(name=f"**`{prefix}alert last`**", value=f"The last World Boss sighting alert", inline=False)
     embed.add_field(name=f"**`{prefix}alert total`**", value=f"Total players registered for World Boss alerts", inline=False)
-    embed.add_field(name=f"**`{prefix}timers`**", value=f"Estimated spawn times for each World Boss", inline=False)
+    embed.add_field(name=f"**`{prefix}timers`** or **`{prefix}scout`**", value=f"Estimated spawn times for each World Boss", inline=False)
     embed.add_field(name=f"**`{prefix}killed <bossname> <time>`**", value=f"Update World Boss killed time", inline=False)
-    embed.add_field(name=f"**`{prefix}reset <time>`**", value=f"Update server boot time. Time format: 9:34pm", inline=False)
     embed.add_field(name=f"**`{prefix}alert help`**", value=f"This help mesage", inline=False)
     if user['is_admin']:
         embed.add_field(name=f"**`{prefix}alert <bossname>`**", value=f"Trigger a World Boss sighting alert!", inline=False)
