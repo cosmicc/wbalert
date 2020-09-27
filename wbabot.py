@@ -149,11 +149,16 @@ running_removeme = {}
 serverup = True
 
 # init new db
-data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600783800}
-msgpack.dump(data, open(userdatafile, 'wb'))
+# data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600783800}
+# msgpack.dump(data, open(userdatafile, 'wb'))
 
 userdata = msgpack.load(open(userdatafile, 'rb'))
 log.info(f'Userdata loaded from {userdatafile}')
+
+data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600783800}
+msgpack.dump(data, open(userdatafile, 'wb'))
+
+
 
 optout_list = sns.list_phone_numbers_opted_out()['phoneNumbers']
 
