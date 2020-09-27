@@ -155,9 +155,13 @@ serverup = True
 userdata = msgpack.load(open(userdatafile, 'rb'))
 log.info(f'Userdata loaded from {userdatafile}')
 
-data = {'0': str(int(datetime.now().timestamp())), '1': {'boss': None, 'zone': None}, '2': {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None} , '3': 1600783800}
-msgpack.dump(data, open(userdatafile, 'wb'))
-
+if '0' not in userdata:
+    userdata['0'] = str(int(datetime.now().timestamp()))
+if '1' not in userdata:
+    userdata['1'] = {'boss': None, 'zone': None}
+if '2' not in userdata:
+    userdata['2'] = {'Azuregos': None, 'Kazzak': None, "Ysondre": None, 'Emeriss': None, 'Taerar': None, 'Lethon': None}
+userdata['3'] = 1600783800
 
 
 optout_list = sns.list_phone_numbers_opted_out()['phoneNumbers']
@@ -246,7 +250,7 @@ def saveuserdata():
     msgpack.dump(userdata, open(userdatafile, 'wb'))
     log.trace(f'Userdata saved to {userdatafile}')
 
-
+saveuserdata()
 def usersub(number):
     if number in sns.list_phone_numbers_opted_out()['phoneNumbers']:
         log.warning(f'Number [{number}] found in OptOut list, trying to remove')
