@@ -211,7 +211,7 @@ async def maintloop():
                     await message.channel.send(embed=embed)
                 del running_alert[user]
 
-        for user, udata in running_addme.items():
+        for user, udata in running_addme.copy().items():
             if udata['timer'] + (60 * 30) > now:
                 log.warning(f'Running addme timeout for [{udata["user_name"]}]')
                 title = f'World Boss Alert has been cancelled'
@@ -220,12 +220,13 @@ async def maintloop():
                 await u.send(embed=embed)
                 del running_addme[user]
 
-        for user, udata in running_removeme.items():
+        for user, udata in running_removeme.copy().items():
             if udata['timer'] + (60 * 30) > now:
                 log.warning(f'Running removeme timeout for [{udata["user_name"]}]')
                 title = f'World Boss Alert has been cancelled'
                 embed = discord.Embed(title=title, color=FAIL_COLOR)
-
+                u = bot.get_user(int(user))
+                await u.send(embed=embed)
                 del running_removeme[user]
 
         dt = datetime.now()
