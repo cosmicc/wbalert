@@ -293,6 +293,7 @@ async def checkoptouts():
 
 
 async def pubmsg(message, user, worldboss, zone, invite):
+    log.debug(f'Executing pubmsg routine for [{worldboss}] in [{zone}]')
     userdata['0'] = str(int(datetime.now().timestamp()))
     userdata['1'] = {'boss': worldboss, 'zone': zone}
     saveuserdata()
@@ -669,6 +670,7 @@ async def alert(message, user, *args):
         else:
             user['step'] = 1
             user['timer'] = int(datetime.now().timestamp())
+            user['invite'] = None
             running_alert[nuid] = user
             await alert1(message, user, *args)
 
