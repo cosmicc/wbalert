@@ -207,52 +207,59 @@ async def is_serverup():
 
 async def maintloop():
     while True:
-        log.trace('Running maintenance loop')
-        pprint(running_alert)
+        # log.trace('Running maintenance loop')
         now = int(datetime.now().timestamp())
-        print(now)
-        for user, udata in running_alert.copy().items():
-            if udata['timer'] + 30 < now:
-                if udata['step'] > 1:
-                    log.warning(f'Alert timeout override for [{udata["user_name"]}]')
-                    message = udata['lastmsg']
-                    worldboss = udata['boss']
-                    zone = udata['zone']
-                    if 'invite' in udata:
-                        invite = udata['invite']
+        try:
+            for user, udata in running_alert.copy().items():
+                if udata['timer'] + 30 < now:
+                    if udata['step'] > 1:
+                        log.warning(f'Alert timeout override for [{udata["user_name"]}]')
+                        message = udata['lastmsg']
+                        worldboss = udata['boss']
+                        zone = udata['zone']
+                        if 'invite' in udata:
+                            invite = udata['invite']
+                        else:
+                            invite = None
+                        user = userdata[str(user)]
+                        await pubmsg(message, user, worldboss, zone, invite)
                     else:
-                        invite = None
-                    user = userdata[str(user)]
-                    await pubmsg(message, user, worldboss, zone, invite)
-                else:
-                    log.warning(f'Running alert timeout for [{udata["user_name"]}]')
-                    title = f'World Boss Alert has been cancelled'
+                        log.warning(f'Running alert timeout for [{udata["user_name"]}]')
+                        title = f'World Boss Alert has been cancelled'
+                        embed = discord.Embed(title=title, color=FAIL_COLOR)
+                        message = udata['lastmsg']
+                        if type(message.channel) == discord.channel.DMChannel:
+                            u = bot.get_user(int(user))
+                            await u.send(embed=embed)
+                        else:
+                            await message.channel.send(embed=embed)
+                        del running_alert[user]
+        except:
+            log.exception('Error in auto running alert removal')
+
+        try:
+            for user, udata in running_addme.copy().items():
+                if udata['timer'] + (60 * 30) < now:
+                    log.warning(f'Running addme timeout for [{udata["user_name"]}]')
+                    title = f'Alert addme wizard has been cancelled'
                     embed = discord.Embed(title=title, color=FAIL_COLOR)
-                    message = udata['lastmsg']
-                    if type(message.channel) == discord.channel.DMChannel:
-                        u = bot.get_user(int(user))
-                        await u.send(embed=embed)
-                    else:
-                        await message.channel.send(embed=embed)
-                    del running_alert[user]
+                    u = bot.get_user(int(user))
+                    await u.send(embed=embed)
+                    del running_addme[user]
+        except:
+            log.exception('Error in auto running addme removal')
 
-        for user, udata in running_addme.copy().items():
-            if udata['timer'] + (60 * 30) < now:
-                log.warning(f'Running addme timeout for [{udata["user_name"]}]')
-                title = f'World Boss Alert has been cancelled'
-                embed = discord.Embed(title=title, color=FAIL_COLOR)
-                u = bot.get_user(int(user))
-                await u.send(embed=embed)
-                del running_addme[user]
-
-        for user, udata in running_removeme.copy().items():
-            if udata['timer'] + (60 * 30) < now:
-                log.warning(f'Running removeme timeout for [{udata["user_name"]}]')
-                title = f'World Boss Alert has been cancelled'
-                embed = discord.Embed(title=title, color=FAIL_COLOR)
-                u = bot.get_user(int(user))
-                await u.send(embed=embed)
-                del running_removeme[user]
+        try:
+            for user, udata in running_removeme.copy().items():
+                if udata['timer'] + (60 * 30) < now:
+                    log.warning(f'Running removeme timeout for [{udata["user_name"]}]')
+                    title = f'Alert removeme wizard has been cancelled'
+                    embed = discord.Embed(title=title, color=FAIL_COLOR)
+                    u = bot.get_user(int(user))
+                    await u.send(embed=embed)
+                    del running_removeme[user]
+        except:
+            log.exception('Error in auto running removeme removal')
 
         dt = datetime.now()
         if dt.weekday() == 1 and (dt.hour >= 13 and dt.hour <= 15):
@@ -305,25 +312,33 @@ async def pubmsg(message, user, worldboss, zone, invite):
     embed.set_footer(text=f'Type {prefix}alert addme to get World Boss alerts\nWorld Boss Broadcast System')
     channel = bot.get_channel(int(announce_chan))
     channel2 = bot.get_channel(int(announce_chan2))
-    for guild in bot.guilds:
-        everyone = get(guild.roles, id=int(everyone_id))
-        everyone2 = get(guild.roles, id=int(everyone_id2))
-    await channel.send(everyone.mention)
-    await channel.send(embed=embed)
-    await channel2.send(everyone2.mention)
-    await channel2.send(embed=embed)
+    try:
+        for guild in bot.guilds:
+            everyone = get(guild.roles, id=int(everyone_id))
+            everyone2 = get(guild.roles, id=int(everyone_id2))
+    except:
+        log.exception('Error while parsing guild roles')
+    try:
+        await channel.send(everyone.mention)
+        await channel.send(embed=embed)
+    except:
+        log.exception('Error while sending channel1 notification')
+    if channel2 is not None:
+        try:
+            await channel2.send(everyone2.mention)
+            await channel2.send(embed=embed)
+        except:
+            log.exception('Error while sending channel2 notification')
     if invite is None:
         smsmsg = f'{worldboss.title()} is up in {zone.title()}!\n\nReply STOP to end these notifications permanently'
     else:
         smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite\n\nReply STOP to end these notifications permanently'
     log.debug(f'Sending AWS SNS notification to topic [{topic_arn}]')
-    if BRANCH != 'develop':
-        try:
-            snsresponse = sns.publish(TopicArn=topic_arn, Message=smsmsg)
-        except:
-            log.exception('Error in AWS SNS topid send')
-    else:
-        log.warning('Skipping actual SNS notifications due to DEV MODE')
+    try:
+        snsresponse = sns.publish(TopicArn=topic_arn, Message=smsmsg)
+    except:
+        log.exception('Error in AWS SNS topid send')
+    pprint(snsresponse)
     if invite is None:
         pomsg = f'{worldboss.title()} is up in {zone.title()}!'
         pmmsg = f'{worldboss.title()} is up in {zone.title()}!\nType !alert remove to stop these alerts'
@@ -334,14 +349,11 @@ async def pubmsg(message, user, worldboss, zone, invite):
         if uid != '0' and uid != '1' and uid != '2' and uid != '3':
             if udata['alert'] == '1':
                 log.debug(f'Sending discord PM notification to [{uid}]')
-                if BRANCH != 'develop':
-                    try:
-                        duser = bot.get_user(int(uid))
-                        await duser.send(pmmsg)
-                    except:
-                        log.exception('Error in pm send')
-                else:
-                    log.warning('Skipping actual PM notifications due to DEV MODE')
+                try:
+                    duser = bot.get_user(int(uid))
+                    await duser.send(pmmsg)
+                except:
+                    log.exception('Error in pm send')
                 await sleep(.1)
             elif udata['alert'] == '2':
                 log.debug(f'Sending pushover notification to [{uid}]')
@@ -849,8 +861,7 @@ async def addme_r1(message, user, *args):
 
 
 async def addme2(message, user, *args):
-    user['step'] = 2
-    running_addme[user['user_id']] = user
+    running_addme[user['user_id']]['step'] = 2
     title = 'Choose how you would like to be notified of World Boss alerts:'
     msg = '**1**: Discord Private Message (Can show as a notification with the mobile discord app)\n**2**: Pushover Notification (Free mobile push notification service [Link](https://pushover.net/))\n**3**: Text Message to cell phone'
     embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
@@ -880,8 +891,7 @@ async def addme_r2(message, user, *args):
 
 
 async def addme3(message, user, *args):
-    user['step'] = 3
-    running_addme[user['user_id']] = user
+    running_addme[user['user_id']]['step'] = 3
     uid = str(user['user_id'])
     if userdata[uid]['alert'] == '3':
         title = 'Please enter the cell phone number you would like texts sent to'
@@ -911,7 +921,10 @@ async def addme_r3(message, user, *args):
             await addme3(message, user, *args)
         else:
             respo = usersub(f'+1{resp}')
-            userdata[uid] = {'alert': '3', 'number': f'+1{resp}', 'pushover_id': 'None', 'subarn': respo}
+            userdata[uid]['alert'] = '3'
+            userdata[uid]['number'] = f'+1{resp}'
+            userdata[uid]['pushover_id'] = 'None'
+            userdata[uid]['subarn'] = respo
             await addmefinish(message, user, *args)
     elif userdata[uid]['alert'] == '2':
         if len(resp) < 20:
@@ -921,7 +934,9 @@ async def addme_r3(message, user, *args):
             await messagesend(message, embed, user, pm=True)
             await addme3(message, user, *args)
         else:
-            userdata[uid] = {'alert': '2', 'number': 'None', 'pushover_id': resp}
+            userdata[uid]['alert'] = '2'
+            userdata[uid]['number'] = 'None'
+            userdata[uid]['pushover_id'] = resp
             await addmefinish(message, user, *args)
 
 
