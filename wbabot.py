@@ -690,18 +690,18 @@ async def killed(message, user, *args):
 async def timers(message, user, *args):
     logcommand(message, user)
     now = int(datetime.now().timestamp())
-    title = 'World Boss spawn estimates'
+    title = 'World Boss spawn window estimates'
     embed = discord.Embed(title=title, color=INFO_COLOR)
     for boss in SPAWN_TIMES:
         nexttime = int(getnextspawn(boss).timestamp())
         nextlongtime = int(getnextspawn(boss, getmax=True).timestamp())
         if nexttime < now:
             msg = f'Spawn window started {elapsedTime(now, nexttime, granularity=3)} ago\n'
-            msg = msg + f'Last possible spawn in {elapsedTime(now, nextlongtime, granularity=3)}'
-            embed.add_field(name=f'{boss} in spawn window now', value=msg, inline=False)
+            msg = msg + f'Spawn windows ends in {elapsedTime(now, nextlongtime, granularity=3)}'
+            embed.add_field(name=f"* {boss}'s spawn window is open now *", value=msg, inline=False)
         else:
             msg = f'Next earliest spawn in {elapsedTime(now, nexttime, granularity=3)}\non {epochtopst(nexttime, fmt="string")} Server Time'
-            embed.add_field(name=f'{boss} waiting for spawn window to open', value=msg, inline=False)
+            embed.add_field(name=f"{boss}'s spawn window is closed", value=msg, inline=False)
     embed.set_footer(text=f'Last server reset recorded {epochtopst(int(userdata["3"]), fmt="string")}')
     await messagesend(message, embed, user, *args)
 
@@ -778,6 +778,7 @@ async def alertfinalize(user, channel):
 
 
 async def sendit(user, channel):
+    del running_alert[user]
     await pubmsg(user, channel, running_alert[user]['boss'], running_alert[user]['zone'])
 
 
