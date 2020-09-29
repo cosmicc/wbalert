@@ -216,26 +216,23 @@ async def maintloop():
         try:
             for user, udata in running_alert.copy().items():
                 if udata['timer'] + 30 < now:
-                    if udata['step'] > 1:
+                    if udata['step'] < 2:
                         log.warning(f'Alert timeout override for [{udata["user_name"]}]')
-                        message = udata['lastmsg']
                         worldboss = udata['boss']
                         zone = udata['zone']
-                        if 'invite' in udata:
-                            invite = udata['invite']
-                        else:
-                            invite = None
-                        user = userdata[str(user)]
-                        await pubmsg(message, user, worldboss, zone, invite)
+                        channel = udata['message'].channel
+                        del running_alert[user]
+                        await pubmsg(user, channel, worldboss, zone)
                     else:
                         log.warning(f'Running alert timeout for [{udata["user_name"]}]')
                         title = f'World Boss Alert has been cancelled'
                         embed = discord.Embed(title=title, color=FAIL_COLOR)
-                        message = udata['lastmsg']
+                        message = udata['message']
                         if type(message.channel) == discord.channel.DMChannel:
                             u = bot.get_user(int(user))
                             await u.send(embed=embed)
                         else:
+                            await udata['message'].delete()
                             await message.channel.send(embed=embed)
                         del running_alert[user]
         except:
@@ -576,7 +573,7 @@ async def on_raw_reaction_add(ctx):
 
 @bot.event
 async def on_ready():
-        log.log("SUCCESS", f"Discord logged in as {bot.user.name} id {bot.user.id}")
+        log.log("SUCCESS", f"Discord logged in as [{bot.user.name}] id [{bot.user.id}]")
         activity = discord.Activity(type=discord.ActivityType.listening, name=f"{prefix}alert")
         try:
             await bot.change_presence(status=discord.Status.online, activity=activity)
@@ -745,7 +742,7 @@ async def alert1(message, user, *args):
             embed = discord.Embed(title=title, description=msg, color=FAIL_COLOR)
             await messagesend(message, embed, user, pm=False)
         else:
-            log.log("TRIGGER", f"Starting ALERT TRIGGER for {user['user_name']} from {user['guild_name']}")
+            log.log("TRIGGER", f"Starting ALERT TRIGGER for [{user['user_name']}] from [{user['guild_name']}]")
             running_alert[nuid]['boss'] = boss.title()
             if WORLD_BOSSES[boss] is None:
                 running_alert[nuid] = user
@@ -757,6 +754,7 @@ async def alert1(message, user, *args):
 
 async def alert2(message, user, *args):
     if user['user_id'] in running_alert:
+        running_alert[user['user_id']]['step'] = 2
         title = f'Select which zone {running_alert[user["user_id"]]["boss"]} is in:'
         msg = ''
         for num, zone in DRAGON_ZONES.items():
