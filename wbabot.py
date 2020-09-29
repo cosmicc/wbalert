@@ -34,6 +34,10 @@ FAIL_COLOR = 0xFF0000
 INFO_COLOR = 0x0088FF
 HELP_COLOR = 0xFF8800
 
+E_NUM = {1: '1️⃣', 2: '2️⃣', 3: '3️⃣', 4: '4️⃣', 5: '5️⃣', 6: '6️⃣'}
+E_YES = '✅'
+E_NO = '❌'
+
 configfile = '/etc/wbalert.cfg'
 serverfile = '/home/ip/wbalert_server.cfg'
 signals = (0, 'SIGHUP', 'SIGINT', 'SIGQUIT', 4, 5, 6, 7, 8, 'SIGKILL', 10, 11, 12, 13, 14, 'SIGTERM')
@@ -299,17 +303,14 @@ async def checkoptouts():
     await sleep(60 * 60)
 
 
-async def pubmsg(message, user, worldboss, zone, invite):
+async def pubmsg(user, channel, worldboss, zone):
     log.debug(f'Executing pubmsg routine for [{worldboss}] in [{zone}]')
     userdata['0'] = str(int(datetime.now().timestamp()))
     userdata['1'] = {'boss': worldboss, 'zone': zone}
     saveuserdata()
-    if invite is None:
-        msg = f"Everyone log in now and get to **{zone.title()}**\n**{len(userdata)-4}** players are being notified"
-    else:
-        msg = f"Everyone log in now and get to **{zone.title()}**\nSend tell to **{invite.capitalize()}** for invite\n**{len(userdata)-4}** players are being notified"
-    embed = discord.Embed(title=f"{worldboss.title()} is UP in {zone.title()}!", description=msg, color=SUCCESS_COLOR)
-    embed.set_footer(text=f'Type {prefix}alert addme to get World Boss alerts\nWorld Boss Broadcast System')
+    msg = f"**{len(userdata)-4}** players are being notified\nType {prefix}alert addme to get World Boss alerts"
+    embed = discord.Embed(title=f"{worldboss.title()} is UP in {zone.title()}, Log in Now!", description=msg, color=SUCCESS_COLOR)
+    embed.set_footer(text=f'World Boss Broadcast System')
     channel = bot.get_channel(int(announce_chan))
     channel2 = bot.get_channel(int(announce_chan2))
     try:
@@ -329,22 +330,15 @@ async def pubmsg(message, user, worldboss, zone, invite):
             await channel2.send(embed=embed)
         except:
             log.exception('Error while sending channel2 notification')
-    if invite is None:
-        smsmsg = f'{worldboss.title()} is up in {zone.title()}!\n\nReply STOP to end these notifications permanently'
-    else:
-        smsmsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite\n\nReply STOP to end these notifications permanently'
+    smsmsg = f'{worldboss.title()} is up in {zone.title()}!\n\nReply STOP to end these notifications permanently'
     log.debug(f'Sending AWS SNS notification to topic [{topic_arn}]')
     try:
         snsresponse = sns.publish(TopicArn=topic_arn, Message=smsmsg)
     except:
         log.exception('Error in AWS SNS topid send')
-    pprint(snsresponse)
-    if invite is None:
-        pomsg = f'{worldboss.title()} is up in {zone.title()}!'
-        pmmsg = f'{worldboss.title()} is up in {zone.title()}!\nType !alert remove to stop these alerts'
-    else:
-        pomsg = f'{worldboss.title()} is up in {zone.title()}!\nSend tell to {invite.capitalize()} for invite'
-        pmmsg = f'{worldboss.title()} is up in {zone.title()}! Send tell to {invite.capitalize()} for invite\nType !alert remove to stop these alerts'
+    # pprint(snsresponse) ###################################################################
+    pomsg = f'{worldboss.title()} is up in {zone.title()}!'
+    pmmsg = f'{worldboss.title()} is up in {zone.title()}!\nType !alert remove to stop these alerts'
     for uid, udata in userdata.items():
         if uid != '0' and uid != '1' and uid != '2' and uid != '3':
             if udata['alert'] == '1':
@@ -365,10 +359,10 @@ async def pubmsg(message, user, worldboss, zone, invite):
                         log.exception('Error in pushover send')
                 else:
                     log.warning('Skipping actual pushover notifications due to DEV MODE')
-    await logchan(message, user, worldboss, zone)
+    await logchan(user, channel, worldboss, zone)
 
 
-async def logchan(message, user, worldboss, zone, *args):
+async def logchan(user, chan, worldboss, zone, *args):
     if log_to_chan != 'False':
         log.debug('Sending alert entry to log channel')
         channel = bot.get_channel(int(log_channel))
@@ -504,6 +498,83 @@ async def messagesend(message, embed, user, pm=False, noembed=False):
 
 
 @bot.event
+async def on_raw_reaction_add(ctx):
+    if ctx.user_id != bot.user.id:
+        chan = bot.get_channel(ctx.channel_id)
+        if ctx.user_id in running_addme:
+            if ctx.message_id == running_addme[ctx.user_id]['message'].id:
+                if ctx.emoji.name == E_NO:
+                    embed = discord.Embed(title='No changes have been made', color=FAIL_COLOR)
+                    await chan.send(embed=embed)
+                    del running_addme[ctx.user_id]
+                if running_addme[ctx.user_id]['step'] == 1:
+                    if ctx.emoji.name == E_YES:
+                        await addme2(ctx.user_id, chan)
+                elif running_addme[ctx.user_id]['step'] == 2:
+                    if ctx.emoji.name == E_NUM[1]:
+                        userdata[str(ctx.user_id)] = {'alert': '1', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
+                        await addmefinish(ctx.user_id, chan)
+                    elif ctx.emoji.name == E_NUM[2]:
+                        userdata[str(ctx.user_id)] = {'alert': '2', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
+                        await addme3(ctx.user_id, chan)
+                    elif ctx.emoji.name == E_NUM[3]:
+                        userdata[str(ctx.user_id)] = {'alert': '3', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
+                        await addme3(ctx.user_id, chan)
+        if ctx.user_id in running_removeme:
+            if ctx.message_id == running_removeme[ctx.user_id]['message'].id:
+                if ctx.emoji.name == E_NO:
+                    embed = discord.Embed(title='No changes have been made', color=FAIL_COLOR)
+                    await chan.send(embed=embed)
+                    del running_removeme[ctx.user_id]
+                elif ctx.emoji.name == E_NUM[1]:
+                    del running_removeme[ctx.user_id]
+                    if userdata[str(ctx.user_id)]['alert'] == '3':
+                        userunsub(str(ctx.user_id))
+                    del userdata[str(ctx.user_id)]
+                    saveuserdata()
+                    title = f'You have been removed from receiving any alerts'
+                    msg = f'Type `{prefix}alert addme` in the future to setup alerts again'
+                    embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
+                    await chan.send(embed=embed)
+                elif ctx.emoji.name == E_NUM[2]:
+                    await addme2(ctx.user_id, chan)
+        if len(running_alert) > 0:
+            for key, each in running_alert.copy().items():
+                if ctx.message_id == each['message'].id:
+                    if ctx.emoji.name == E_NO:
+                        pprint(ctx)
+                        if ctx.guild_id is not None:
+                            await running_alert[key]['message'].delete()
+                        embed = discord.Embed(title='Alert cancelled', color=FAIL_COLOR)
+                        await chan.send(embed=embed)
+                        running_alert.clear()
+                    elif ctx.emoji.name == E_YES:
+                        if ctx.guild_id is not None:
+                            await running_alert[key]['message'].delete()
+                        await sendit(ctx.user_id, chan)
+                    elif ctx.emoji.name == E_NUM[1]:
+                        running_alert[key]['zone'] = DRAGON_ZONES[1]
+                        if ctx.guild_id is not None:
+                            await running_alert[key]['message'].delete()
+                        await alertfinalize(ctx.user_id, chan)
+                    elif ctx.emoji.name == E_NUM[2]:
+                        running_alert[key]['zone'] = DRAGON_ZONES[2]
+                        if ctx.guild_id is not None:
+                            await running_alert[key]['message'].delete()
+                        await alertfinalize(ctx.user_id, chan)
+                    elif ctx.emoji.id == E_NUM[3]:
+                        running_alert[key]['zone'] = DRAGON_ZONES[3]
+                        if ctx.guild_name is not None:
+                            await running_alert[key]['message'].delete()
+                        await alertfinalize(ctx.user_id, chan)
+                    elif ctx.emoji.id == E_NUM[4]:
+                        running_alert[key]['zone'] = DRAGON_ZONES[4]
+                        if ctx.guild_name is not None:
+                            await running_alert[key]['message'].delete()
+                        await alertfinalize(ctx.user_id, chan)
+
+
+@bot.event
 async def on_ready():
         log.log("SUCCESS", f"Discord logged in as {bot.user.name} id {bot.user.id}")
         activity = discord.Activity(type=discord.ActivityType.listening, name=f"{prefix}alert")
@@ -520,94 +591,64 @@ async def on_message(message):
         if user['guild_id'] is None:
             pass
         elif user['is_user'] or user['is_admin']:
-            if user['user_id'] in running_addme:
-                if message.content.lower() == 'cancel' or message.content.lower() == 'stop':
-                    title = 'Alert setup cancelled'
-                    embed = discord.Embed(title=title, color=FAIL_COLOR)
-                    del running_addme[user['user_id']]
-                    await messagesend(message, embed, user)
-                elif running_addme[user['user_id']]['step'] == 1:
-                    await addme_r1(message, user)
-                elif running_addme[user['user_id']]['step'] == 2:
-                    await addme_r2(message, user)
-                elif running_addme[user['user_id']]['step'] == 3:
-                    await addme_r3(message, user)
-            elif user['user_id'] in running_removeme:
-                if message.content.lower() == 'cancel' or message.content.lower() == 'stop':
-                    title = 'Alert setup cancelled'
-                    embed = discord.Embed(title=title, color=FAIL_COLOR)
-                    del running_removeme[user['user_id']]
-                    await messagesend(message, embed, user)
-                elif running_removeme[user['user_id']]['step'] == 1:
-                    await removeme_r1(message, user)
-            elif user['user_id'] in running_alert:
-                if message.content.lower() == 'cancel' or message.content.lower() == 'stop':
-                    title = 'Alert cancelled'
-                    embed = discord.Embed(title=title, color=FAIL_COLOR)
-                    del running_alert[user['user_id']]
-                    await messagesend(message, embed, user)
-                elif running_alert[user['user_id']]['step'] == 1:
-                    await alert_r1(message, user)
-                elif running_alert[user['user_id']]['step'] == 2:
-                    await alert_r2(message, user)
-                elif running_alert[user['user_id']]['step'] == 3:
-                    await sendit(message, user)
-            else:
-                args = message.content[1:].split(' ')
-                if type(message.channel) == discord.channel.DMChannel:
-                    if args[0].startswith('dd'):
+            args = message.content[1:].split(' ')
+            if type(message.channel) == discord.channel.DMChannel:
+                if user['user_id'] in running_addme:
+                    if running_addme[user['user_id']]['step'] == 3:
+                        await addme_r3(message, user['user_id'], message.channel)
+                if args[0].startswith('dd'):
+                    await addme(message, user, *args)
+                elif args[0].startswith('emove'):
+                    await removeme(message, user, *args)
+                elif args[0].startswith('top'):
+                    await removeme(message, user, *args)
+                elif args[0].startswith('tatus'):
+                    await status(message, user, *args)
+                elif args[0].startswith('otal'):
+                    await total(message, user, *args)
+                elif args[0].startswith('lert'):
+                    await status(message, user, *args)
+                elif args[0].startswith('hange'):
+                    await addme(message, user, *args)
+                elif args[0].startswith('elp'):
+                    await help(message, user, *args)
+                elif args[0].startswith('ast'):
+                    await last(message, user, *args)
+                elif args[0].startswith('est') and user['is_superadmin']:
+                    await test(message, user, *args)
+                elif args[0].startswith('orceremove') and user['is_superadmin']:
+                    await forceremove(message, user, *args)
+            if message.content.lower().startswith(f'{prefix}alert'):
+                args.pop(0)
+                if len(args) == 0:
+                    await status(message, user, *args)
+                else:
+                    if args[0] == 'addme' or args[0] == 'add' or args[0] == 'change' or args[0] == 'changeme':
                         await addme(message, user, *args)
-                    elif args[0].startswith('emove'):
+                    elif args[0] == 'removeme' or args[0] == 'remove' or args[0] == 'stop':
                         await removeme(message, user, *args)
-                    elif args[0].startswith('top'):
-                        await removeme(message, user, *args)
-                    elif args[0].startswith('tatus'):
+                    elif args[0] == 'status':
                         await status(message, user, *args)
-                    elif args[0].startswith('otal'):
-                        await total(message, user, *args)
-                    elif args[0].startswith('lert'):
-                        await status(message, user, *args)
-                    elif args[0].startswith('hange'):
-                        await addme(message, user, *args)
-                    elif args[0].startswith('elp'):
-                        await help(message, user, *args)
-                    elif args[0].startswith('ast'):
+                    elif args[0] == 'last':
                         await last(message, user, *args)
-                    elif args[0].startswith('est') and user['is_superadmin']:
+                    elif args[0] == 'total':
+                        await total(message, user, *args)
+                    elif args[0] == 'killed' or args[0] == 'kill':
+                        await killed(message, user, *args)
+                    elif args[0] == 'timer' or args[0] == 'timers' or args[0] == 'scout':
+                        await timers(message, user, *args)
+                    elif args[0] == 'test' and user['is_superadmin']:
                         await test(message, user, *args)
-                    elif args[0].startswith('orceremove') and user['is_superadmin']:
+                    elif args[0] == 'forceremove' and user['is_superadmin']:
                         await forceremove(message, user, *args)
-                if message.content.lower().startswith(f'{prefix}alert'):
-                    args.pop(0)
-                    if len(args) == 0:
-                        await status(message, user, *args)
                     else:
-                        if args[0] == 'addme' or args[0] == 'add' or args[0] == 'change' or args[0] == 'changeme':
-                            await addme(message, user, *args)
-                        elif args[0] == 'removeme' or args[0] == 'remove' or args[0] == 'stop':
-                            await removeme(message, user, *args)
-                        elif args[0] == 'status':
-                            await status(message, user, *args)
-                        elif args[0] == 'last':
-                            await last(message, user, *args)
-                        elif args[0] == 'total':
-                            await total(message, user, *args)
-                        elif args[0] == 'killed' or args[0] == 'kill':
-                            await killed(message, user, *args)
-                        elif args[0] == 'timer' or args[0] == 'timers' or args[0] == 'scout':
-                            await timers(message, user, *args)
-                        elif args[0] == 'test' and user['is_superadmin']:
-                            await test(message, user, *args)
-                        elif args[0] == 'forceremove' and user['is_superadmin']:
-                            await forceremove(message, user, *args)
-                        else:
-                            await alert(message, user, *args)
-                elif message.content.lower().startswith(f'{prefix}kill'):
-                    args.pop(0)
-                    await killed(message, user, *args)
-                elif message.content.lower().startswith(f'{prefix}time') or message.content.lower().startswith(f'{prefix}scout'):
-                    args.pop(0)
-                    await timers(message, user, *args)
+                        await alert(message, user, *args)
+            elif message.content.lower().startswith(f'{prefix}kill'):
+                args.pop(0)
+                await killed(message, user, *args)
+            elif message.content.lower().startswith(f'{prefix}time') or message.content.lower().startswith(f'{prefix}scout'):
+                args.pop(0)
+                await timers(message, user, *args)
 
 
 async def killed(message, user, *args):
@@ -679,10 +720,14 @@ async def alert(message, user, *args):
             msg = f'Last World Boss alert was {userdata["1"]["boss"]} in {userdata["1"]["zone"]}\n{convert_time(userdata["0"], tz="US/Pacific")} Server time, {elapsedTime(int(datetime.now().timestamp()), int(userdata["0"]))} ago'
             embed = discord.Embed(title=title, description=msg, color=FAIL_COLOR)
             await messagesend(message, embed, user, pm=False)
+        elif len(running_alert) > 0:
+            log.info(f"Failed alert trigger alert already running for {user['user_name']} from {user['guild_name']}")
+            title = f'Someone else is running an alert now, please wait 30 seconds'
+            embed = discord.Embed(title=title, description=msg, color=FAIL_COLOR)
+            await messagesend(message, embed, user, pm=False)
         else:
             user['step'] = 1
             user['timer'] = int(datetime.now().timestamp())
-            user['invite'] = None
             running_alert[nuid] = user
             await alert1(message, user, *args)
 
@@ -701,118 +746,40 @@ async def alert1(message, user, *args):
             await messagesend(message, embed, user, pm=False)
         else:
             log.log("TRIGGER", f"Starting ALERT TRIGGER for {user['user_name']} from {user['guild_name']}")
-            nuser = running_alert[nuid]
-            nuser['boss'] = boss.title()
+            running_alert[nuid]['boss'] = boss.title()
             if WORLD_BOSSES[boss] is None:
-                running_alert[nuid] = nuser
+                running_alert[nuid] = user
                 await alert2(message, user, *args)
             else:
-                nuser = running_alert[nuid]
-                nuser['zone'] = WORLD_BOSSES[boss]
-                running_alert[nuid] = nuser
-                await alert3(message, user, *args)
+                running_alert[nuid]['zone'] = WORLD_BOSSES[boss]
+                await alertfinalize(nuid, message.channel)
 
 
 async def alert2(message, user, *args):
-    nuid = user['user_id']
     if user['user_id'] in running_alert:
         title = f'Select which zone {running_alert[user["user_id"]]["boss"]} is in:'
         msg = ''
         for num, zone in DRAGON_ZONES.items():
-            msg = msg + f'**{num}**: {zone.title()}\n'
+            msg = msg + f'{E_NUM[num]} {zone.title()}\n'
         embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-        embed.set_footer(text="Type your selection number below")
-        lastmsg = await messagesend(message, embed, user, pm=False)
-        nuser = running_alert[nuid]
-        nuser['lastmsg'] = lastmsg
-        running_alert[nuid] = nuser
+        moji = await messagesend(message, embed, user, pm=False)
+        running_alert[user['user_id']]['message'] = moji
+        for num in DRAGON_ZONES:
+            await moji.add_reaction(E_NUM[num])
 
 
-async def alert_r1(message, user, *args):
-    resp = message.content
-    nuid = user['user_id']
-    lastmsg = running_alert[user['user_id']]['lastmsg']
-    if type(lastmsg.channel) != discord.channel.DMChannel:
-        await lastmsg.delete()
-    if resp.isnumeric():
-        if resp == '0' and int(resp) < len(DRAGON_ZONES):
-            log.warning(f"Invalid answer to start setup again [{message.content}]")
-            msg = 'Invalid response.  Select a number for the zone listed'
-            embed = discord.Embed(description=msg, color=FAIL_COLOR)
-            await messagesend(message, embed, user, pm=False)
-            await alert2(message, user, *args)
-        else:
-            nuser = running_alert[nuid]
-            nuser['zone'] = DRAGON_ZONES[int(resp)]
-            running_alert[nuid] = nuser
-            await alert3(message, user, *args)
-
-
-async def alert3(message, user, *args):
-    nuid = user['user_id']
-    if nuid in running_alert:
-        title = f'Type character name to send tell for invites:'
-        msg = 'All users will be notified who to send tell for invite'
-        embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-        embed.set_footer(text="Type the character name below")
-        lastmsg = await messagesend(message, embed, user, pm=False)
-        nuser = running_alert[nuid]
-        nuser['lastmsg'] = lastmsg
-        nuser['step'] = 2
-        running_alert[nuid] = nuser
-
-
-async def alert_r2(message, user, *args):
-    resp = message.content
-    nuid = user['user_id']
-    lastmsg = running_alert[user['user_id']]['lastmsg']
-    if type(lastmsg.channel) != discord.channel.DMChannel:
-        await lastmsg.delete()
-    nuser = running_alert[nuid]
-    nuser['invite'] = resp
-    running_alert[nuid] = nuser
-    await alertfinalize(message, user, *args)
-
-
-async def alertfinalize(message, user, *args):
-    nuid = user['user_id']
-    if type(message.channel) != discord.channel.DMChannel:
-        await message.delete()
+async def alertfinalize(user, channel):
     title = f'You are about send a World Boss Alert!'
-    msg = f'**{running_alert[nuid]["boss"].title()}** in **{running_alert[nuid]["zone"].title()}**\nTells will go to **{running_alert[nuid]["invite"].title()}** for raid invite\nEveryone subscribed will get an alert to log on now!\nAre you sure you want to do this?\n\n**1**: Yes, Send it!\n**2**: No, Cancel alert'
+    msg = f'**{running_alert[user]["boss"].title()}** in **{running_alert[user]["zone"].title()}**\nEveryone subscribed will get an alert to log on now!\nAre you sure you want to do this?\n\n{E_YES} Yes, Send it!\n{E_NO} No, Cancel alert'
     embed = discord.Embed(title=title, description=msg, color=SUCCESS_COLOR)
-    embed.set_footer(text='Type your number selection below')
-    lastmsg = await messagesend(message, embed, user, pm=False)
-    nuser = running_alert[nuid]
-    nuser['lastmsg'] = lastmsg
-    nuser['step'] = 3
-    running_alert[nuid] = nuser
+    moji = await channel.send(embed=embed)
+    running_alert[user]['message'] = moji
+    await moji.add_reaction(E_YES)
+    await moji.add_reaction(E_NO)
 
 
-async def sendit(message, user):
-    resp = message.content
-    nuid = user['user_id']
-    lastmsg = running_alert[user['user_id']]['lastmsg']
-    if type(message.channel) != discord.channel.DMChannel:
-        await message.delete()
-    if type(lastmsg.channel) != discord.channel.DMChannel:
-        await lastmsg.delete()
-    if resp != '1' and resp != '2':
-        log.warning(f"Invalid answer to start setup again [{message.content}]")
-        msg = 'Invalid response.  Select 1 or 2'
-        embed = discord.Embed(description=msg, color=FAIL_COLOR)
-        await messagesend(message, embed, user, pm=False)
-        await alertfinalize(message, user)
-    else:
-        if resp == '1':
-            await pubmsg(message, user, running_alert[nuid]['boss'], running_alert[nuid]['zone'], running_alert[nuid]['invite'])
-            del running_alert[nuid]
-        elif resp == '2':
-            log.warning(f"World boss alert has been cancelled")
-            del running_alert[nuid]
-            title = 'Alert Cancelled'
-            embed = discord.Embed(title=title, color=FAIL_COLOR)
-            await messagesend(message, embed, user, pm=False)
+async def sendit(user, channel):
+    await pubmsg(user, channel, running_alert[user]['boss'], running_alert[user]['zone'])
 
 
 async def addme(message, user, *args):
@@ -820,7 +787,7 @@ async def addme(message, user, *args):
     uid = str(user['user_id'])
     if user['user_id'] not in running_addme:
         user['timer'] = int(datetime.now().timestamp())
-        log.info(f"Starting Addme for {user['user_name']} from {user['guild_name']}")
+        log.info(f"Starting Addme for [{user['user_name']}] from [{user['guild_name']}]")
         user['step'] = 1
         running_addme[user['user_id']] = user
         if uid in userdata:
@@ -831,84 +798,51 @@ async def addme(message, user, *args):
             elif userdata[uid]['alert'] == '2':
                 atype = 'Pushover Notification'
             title = f'You are already setup for {atype} alerts\nWould you like to change something?'
-            msg = f'**1**: Yes\n**2**: No'
+            msg = f'{E_YES} Yes\n{E_NO} No'
             embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-            await messagesend(message, embed, user, pm=True)
+            moji = await messagesend(message, embed, user, pm=True)
+            running_addme[user['user_id']]['message'] = moji
+            await moji.add_reaction(E_YES)
+            await moji.add_reaction(E_NO)
         else:
-            title = f"Welcome to the World Boss Broadcasting System!"
-            msg = "Type `cancel` at any time to cancel setup"
-            embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-            await messagesend(message, embed, user, pm=True)
-            await addme2(message, user, *args)
+            await addme2(user['user_id'], message.channel)
 
 
-async def addme_r1(message, user, *args):
-    resp = message.content
-    if resp != '1' and resp != '2':
-        log.warning(f"Invalid answer to start setup again [{message.content}]")
-        msg = 'Invalid response.  Select 1 or 2'
-        embed = discord.Embed(description=msg, color=FAIL_COLOR)
-        await messagesend(message, embed, user, pm=True)
-        await addme(message, user, *args)
-    elif resp == '1':
-        await addme2(message, user, *args)
-    elif resp == '2':
-        title = f'Alert setup has been cancelled'
-        msg = f'Type `{prefix}alert addme` in the future to run the setup wizard again'
-        embed = discord.Embed(title=title, description=msg, color=FAIL_COLOR)
-        del running_addme[user['user_id']]
-        await messagesend(message, embed, user, pm=True)
-
-
-async def addme2(message, user, *args):
-    running_addme[user['user_id']]['step'] = 2
-    title = 'Choose how you would like to be notified of World Boss alerts:'
-    msg = '**1**: Discord Private Message (Can show as a notification with the mobile discord app)\n**2**: Pushover Notification (Free mobile push notification service [Link](https://pushover.net/))\n**3**: Text Message to cell phone'
+async def addme2(user, channel):
+    if user not in running_addme:
+        log.trace('missing running_addme user, using running_removeme user')
+        running_addme[user] = running_removeme[user]
+        del running_removeme[user]
+    running_addme[user]['step'] = 2
+    title = 'Welcome to the World Boss Broadcast System!\nChoose how you would like to be notified of World Boss alerts:'
+    msg = f'{E_NUM[1]}  Discord Private Message (Can show as a notification with the mobile discord app)\n{E_NUM[2]}  Pushover Notification (Free mobile push notification service [Link](https://pushover.net/))\n{E_NUM[3]}  Text Message to cell phone\n{E_NO}  Cancel changes'
     embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-    embed.set_footer(text="Type your selection number below")
-    await messagesend(message, embed, user, pm=True)
+    moji = await channel.send(embed=embed)
+    running_addme[user]['message'] = moji
+    await moji.add_reaction(E_NUM[1])
+    await moji.add_reaction(E_NUM[2])
+    await moji.add_reaction(E_NUM[3])
+    await moji.add_reaction(E_NO)
 
 
-async def addme_r2(message, user, *args):
-    resp = message.content
-    uid = str(user['user_id'])
-    if resp != '1' and resp != '2' and resp != '3':
-        msg = 'Invalid selection. Please answer 1, 2 or 3'
-        embed = discord.Embed(description=msg, color=FAIL_COLOR)
-        embed.set_footer(text='Type cancel to cancel setup')
-        await messagesend(message, embed, user, pm=True)
-        await addme2(message, user, *args)
-    else:
-        if resp == '1':
-            userdata[uid] = {'alert': '1', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
-            await addmefinish(message, user, *args)
-        elif resp == '3':
-            userdata[uid] = {'alert': '3', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
-            await addme3(message, user, *args)
-        elif resp == '2':
-            userdata[uid] = {'alert': '2', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
-            await addme3(message, user, *args)
-
-
-async def addme3(message, user, *args):
-    running_addme[user['user_id']]['step'] = 3
-    uid = str(user['user_id'])
-    if userdata[uid]['alert'] == '3':
+async def addme3(user, channel):
+    running_addme[user]['step'] = 3
+    if userdata[str(user)]['alert'] == '3':
         title = 'Please enter the cell phone number you would like texts sent to'
         msg = 'Area code and number with no spaces or special characters\nExample: 5551214480'
         embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
         embed.set_footer(text='Type your phone number below or cancel to cancel setup')
-    elif userdata[uid]['alert'] == '2':
+    elif userdata[str(user)]['alert'] == '2':
         title = 'Please paste your pushover user key'
         msg = 'You sign up for a free account [here](https://pushover.net/signup) to get a user key'
         embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-        embed.set_footer(text='Paste your pushover user key below or cancel to cancel setup')
-    await messagesend(message, embed, user, pm=True)
+        embed.set_footer(text='Paste your pushover user key below or canel to cancel setup')
+    await channel.send(embed=embed)
 
 
-async def addme_r3(message, user, *args):
+async def addme_r3(message, user, channel):
     resp = message.content
-    uid = str(user['user_id'])
+    uid = str(user)
     if userdata[uid]['alert'] == '3':
         if len(resp) == 11 and resp.isnumeric():
             if resp[0] == '1':
@@ -917,45 +851,44 @@ async def addme_r3(message, user, *args):
             log.warning(f"Invalid answer to start setup again [{message.content}]")
             msg = 'Invalid number. Enter area code and number, no spaces, no special characters: 5551214480'
             embed = discord.Embed(description=msg, color=FAIL_COLOR)
-            await messagesend(message, embed, user, pm=True)
-            await addme3(message, user, *args)
+            await channel.send(embed=embed)
+            await addme3(user, channel)
         else:
             respo = usersub(f'+1{resp}')
             userdata[uid]['alert'] = '3'
             userdata[uid]['number'] = f'+1{resp}'
             userdata[uid]['pushover_id'] = 'None'
             userdata[uid]['subarn'] = respo
-            await addmefinish(message, user, *args)
+            await addmefinish(user, channel)
     elif userdata[uid]['alert'] == '2':
         if len(resp) < 20:
             log.warning(f"Invalid answer to start setup again [{message.content}]")
             msg = "Invalid pushover user key.\nPaste the 'Your User Key' in the top right of your pushover account page"
             embed = discord.Embed(description=msg, color=FAIL_COLOR)
-            await messagesend(message, embed, user, pm=True)
-            await addme3(message, user, *args)
+            await channel.send(embed=embed)
+            await addme3(user, channel)
         else:
             userdata[uid]['alert'] = '2'
             userdata[uid]['number'] = 'None'
             userdata[uid]['pushover_id'] = resp
-            await addmefinish(message, user, *args)
+            await addmefinish(user, channel)
 
 
-async def addmefinish(message, user, *args):
-    uid = str(user['user_id'])
-    if userdata[uid]['alert'] == '2':
+async def addmefinish(user, channel):
+    if userdata[str(user)]['alert'] == '2':
         atype = "Pushover notification"
-    elif userdata[uid]['alert'] == '3':
+    elif userdata[str(user)]['alert'] == '3':
         atype = "Text Message"
-        usersub(userdata[uid]['number'])
-    elif userdata[uid]['alert'] == '1':
+        usersub(userdata[str(user)]['number'])
+    elif userdata[str(user)]['alert'] == '1':
         atype = "Discord PM"
     saveuserdata()
     title = 'Alert setup complete!'
     msg = f'You will now receive a {atype} when someone triggers a World Boss alert.\nType `{prefix}alert addme` to change your notification type\nType `{prefix}alert removeme` to remove yourself from notifications.'
     embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-    log.info(f"Completed Addme for {user['user_name']} from {user['guild_name']}")
-    del running_addme[user['user_id']]
-    await messagesend(message, embed, user, pm=True)
+    log.info(f"Completed Addme for [{running_addme[user]['user_name']}] from [{running_addme[user]['guild_name']}]")
+    del running_addme[user]
+    await channel.send(embed=embed)
 
 
 async def removeme(message, user, *args):
@@ -963,7 +896,7 @@ async def removeme(message, user, *args):
     uid = str(user['user_id'])
     if user['user_id'] not in running_removeme:
         user['timer'] = int(datetime.now().timestamp())
-        log.info(f"Starting removeme for {user['user_name']} from {user['guild_name']}")
+        log.info(f"Starting removeme for [{user['user_name']}] from [{user['guild_name']}]")
         user['step'] = 1
         running_removeme[user['user_id']] = user
         if uid in userdata:
@@ -974,46 +907,19 @@ async def removeme(message, user, *args):
             elif userdata[uid]['alert'] == '1':
                 atype = "Discord PM"
             title = f'You are setup to receive {atype} alerts\nWhat would you like to do?'
-            msg = f"**1**: Remove yourself from alerts permenantly\n**2**: Change how you get alerts\n**3**: Don't change anything"
+            msg = f"{E_NUM[1]}  Remove yourself from getting alerts\n{E_NUM[2]} Change how you get alerts\n{E_NO}: Don't change anything"
             embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-            embed.set_footer(text='Type your selection number below')
-            await messagesend(message, embed, user, pm=True)
+            moji = await messagesend(message, embed, user, pm=True)
+            running_removeme[user['user_id']]['message'] = moji
+            await moji.add_reaction(E_NUM[1])
+            await moji.add_reaction(E_NUM[2])
+            await moji.add_reaction(E_NO)
         else:
             title = f"You are not setup to receive any alerts"
             msg = f'Type `{prefix}alert addme` to be notified of World Boss alerts'
             embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
             del running_removeme[user['user_id']]
             await messagesend(message, embed, user, pm=True)
-
-
-async def removeme_r1(message, user, *args):
-    resp = message.content
-    uid = str(user['user_id'])
-    if resp != '1' and resp != '2' and resp != '3':
-        log.warning(f"Invalid answer to start setup again [{message.content}]")
-        msg = 'Invalid response.  Select 1, 2 or 3'
-        embed = discord.Embed(description=msg, color=FAIL_COLOR)
-        await messagesend(message, embed, user, pm=True)
-        await removeme(message, user, *args)
-    elif resp == '2':
-        del running_removeme[user['user_id']]
-        await addme2(message, user, *args)
-    elif resp == '3':
-        title = f'Nothing has been changed'
-        msg = f'Type `{prefix}alert addme` in the future to change alert settings\nType `{prefix}alert removeme` to stop alerts'
-        embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-        del running_removeme[user['user_id']]
-        await messagesend(message, embed, user, pm=True)
-    elif resp == '1':
-        del running_removeme[user['user_id']]
-        if userdata[uid]['alert'] == '3':
-            userunsub(uid)
-        del userdata[uid]
-        saveuserdata()
-        title = f'You have been removed from receiving any alerts'
-        msg = f'Type `{prefix}alert addme` in the future to setup alerts again"'
-        embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-        await messagesend(message, embed, user, pm=True)
 
 
 async def total(message, user, *args):
@@ -1103,7 +1009,16 @@ async def test(message, user, *args):
     log.success(f'{len(running_addme)} {running_addme}')
     log.info(f'{len(running_removeme)} {running_removeme}')
     log.success(f'{len(running_alert)} {running_alert}')
-    log.info(f'{userdata["2"]}')
+    #log.info(f'{userdata["2"]}')
+    #title = f'Pick some shit :one:'
+    #embed = discord.Embed(title=title, color=INFO_COLOR)
+    #embed.add_field(name='entry :two:', value='value :three:')
+
+    #moji = await messagesend(message, embed, user, pm=True)
+
+    #await moji.add_reaction(E_YES)
+    #await moji.add_reaction(E_NO)
+
     # blizcli = BlizzardAPI(bliz_int_client, bliz_int_secret, .get("server", "server_region"))
     # await blizcli.authorize()
     # pprint(await blizcli.realm_list())
