@@ -504,19 +504,20 @@ async def on_raw_reaction_add(ctx):
                     embed = discord.Embed(title='No changes have been made', color=FAIL_COLOR)
                     await chan.send(embed=embed)
                     del running_addme[ctx.user_id]
-                if running_addme[ctx.user_id]['step'] == 1:
-                    if ctx.emoji.name == E_YES:
-                        await addme2(ctx.user_id, chan)
-                elif running_addme[ctx.user_id]['step'] == 2:
-                    if ctx.emoji.name == E_NUM[1]:
-                        userdata[str(ctx.user_id)] = {'alert': '1', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
-                        await addmefinish(ctx.user_id, chan)
-                    elif ctx.emoji.name == E_NUM[2]:
-                        userdata[str(ctx.user_id)] = {'alert': '2', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
-                        await addme3(ctx.user_id, chan)
-                    elif ctx.emoji.name == E_NUM[3]:
-                        userdata[str(ctx.user_id)] = {'alert': '3', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
-                        await addme3(ctx.user_id, chan)
+                if 'step' in running_addme[ctx.user_id]:
+                    if running_addme[ctx.user_id]['step'] == 1:
+                        if ctx.emoji.name == E_YES:
+                            await addme2(ctx.user_id, chan)
+                    elif running_addme[ctx.user_id]['step'] == 2:
+                        if ctx.emoji.name == E_NUM[1]:
+                            userdata[str(ctx.user_id)] = {'alert': '1', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
+                            await addmefinish(ctx.user_id, chan)
+                        elif ctx.emoji.name == E_NUM[2]:
+                            userdata[str(ctx.user_id)] = {'alert': '2', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
+                            await addme3(ctx.user_id, chan)
+                        elif ctx.emoji.name == E_NUM[3]:
+                            userdata[str(ctx.user_id)] = {'alert': '3', 'number': 'None', 'pushover_id': 'None', 'subarn': 'None'}
+                            await addme3(ctx.user_id, chan)
         if ctx.user_id in running_removeme:
             if ctx.message_id == running_removeme[ctx.user_id]['message'].id:
                 if ctx.emoji.name == E_NO:
@@ -815,7 +816,8 @@ async def addme2(user, channel):
     title = 'Welcome to the World Boss Broadcast System!\nChoose how you would like to be notified of World Boss alerts:'
     msg = f'{E_NUM[1]}  Discord Private Message (Can show as a notification with the mobile discord app)\n{E_NUM[2]}  Pushover Notification (Free mobile push notification service [Link](https://pushover.net/))\n{E_NUM[3]}  Text Message to cell phone\n{E_NO}  Cancel changes'
     embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
-    moji = await channel.send(embed=embed)
+    userobj = bot.get_user(user)
+    moji = await userobj.send(embed=embed)
     running_addme[user]['message'] = moji
     await moji.add_reaction(E_NUM[1])
     await moji.add_reaction(E_NUM[2])
@@ -835,12 +837,14 @@ async def addme3(user, channel):
         msg = 'You sign up for a free account [here](https://pushover.net/signup) to get a user key'
         embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
         embed.set_footer(text='Paste your pushover user key below or canel to cancel setup')
-    await channel.send(embed=embed)
+    userobj = bot.get_user(user)
+    await userobj.send(embed=embed)
 
 
 async def addme_r3(message, user, channel):
     resp = message.content
     uid = str(user)
+    userobj = bot.get_user(user)
     if userdata[uid]['alert'] == '3':
         if len(resp) == 11 and resp.isnumeric():
             if resp[0] == '1':
@@ -849,7 +853,7 @@ async def addme_r3(message, user, channel):
             log.warning(f"Invalid answer to start setup again [{message.content}]")
             msg = 'Invalid number. Enter area code and number, no spaces, no special characters: 5551214480'
             embed = discord.Embed(description=msg, color=FAIL_COLOR)
-            await channel.send(embed=embed)
+            await userobj.send(embed=embed)
             await addme3(user, channel)
         else:
             respo = usersub(f'+1{resp}')
@@ -863,7 +867,7 @@ async def addme_r3(message, user, channel):
             log.warning(f"Invalid answer to start setup again [{message.content}]")
             msg = "Invalid pushover user key.\nPaste the 'Your User Key' in the top right of your pushover account page"
             embed = discord.Embed(description=msg, color=FAIL_COLOR)
-            await channel.send(embed=embed)
+            await userobj.send(embed=embed)
             await addme3(user, channel)
         else:
             userdata[uid]['alert'] = '2'
@@ -886,7 +890,8 @@ async def addmefinish(user, channel):
     embed = discord.Embed(title=title, description=msg, color=INFO_COLOR)
     log.info(f"Completed Addme for [{running_addme[user]['user_name']}] from [{running_addme[user]['guild_name']}]")
     del running_addme[user]
-    await channel.send(embed=embed)
+    userobj = bot.get_user(user)
+    await userobj.send(embed=embed)
 
 
 async def removeme(message, user, *args):
